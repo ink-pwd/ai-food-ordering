@@ -1,0 +1,1144 @@
+openapi: 3.1.0
+info:
+  title: AI Food Ordering Internal API
+  version: 1.0.0
+  description: |
+    Internal REST API for the AI Food Ordering backend.
+
+    The API is intended for trusted internal clients such as the MCP service
+    and Telegram integration. All API routes require `X-Internal-Api-Token`.
+    Session-bound routes additionally require `X-Session-Token`.
+
+    The backend owns restaurant selection, cart state, prices, totals, order
+    state and Dots integration. Clients must not attempt to submit internal
+    identifiers or calculated totals.
+
+    Automated API/E2E tests run against the Laravel application and mock the
+    external Dots HTTP boundary where appropriate.
+servers:
+  - url: http://localhost:8080
+    description: Local Docker environment
+
+tags:
+  - name: Sessions
+    description: Internal client session lifecycle and customer contact data.
+  - name: Catalog
+    description: Restaurant catalog, categories, products and search.
+  - name: Cart
+    description: Session-bound cart lifecycle and item mutations.
+  - name: Orders
+    description: Checkout, idempotent order creation and current order status.
+
+paths:
+  /api/sessions:
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Create an internal session
+      description: |
+        Creates a server-side session for the configured active restaurant.
+        The restaurant is selected by backend configuration; the client cannot
+        choose or override it.
+
+        The returned `session_token` is required for all session-bound cart,
+        contact and order endpoints.
+      security:
+        - InternalApiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+            examples:
+              chatgpt:
+                value:
+                  channel: chatgpt
+                  external_session_id: chatgpt-conversation-123
+              telegram:
+                value:
+                  channel: telegram
+                  external_session_id: telegram-chat-123456
+      responses:
+        '201':
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionCreatedResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: Session service unavailable because required internal session/restaurant configuration is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: Session service unavailable.
+
+  /api/sessions/current/contact:
+    put:
+      tags: [Sessions]
+      operationId: updateCurrentSessionContact
+      summary: Save or replace customer contact data
+      description: |
+        Stores customer name and normalized phone number in the current
+        server-side session.
+
+        Phone input accepts common formatting characters. The backend removes
+        spaces, hyphens and parentheses and normalizes supported Ukrainian
+        formats before storage. A valid normalized number must use international
+        `+` format and contain 8-15 digits after the plus sign.
+
+        `phone_verified` is always controlled by the backend and is initially
+        `false`.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSessionContactRequest'
+            example:
+              name: Yehor
+              phone: '+380931234567'
+      responses:
+        '200':
+          description: Contact data saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionContactResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/restaurants/{restaurant}/categories:
+    get:
+      tags: [Catalog]
+      operationId: listRestaurantCategories
+      summary: List active restaurant categories
+      description: |
+        Returns active categories for an active restaurant, ordered by
+        `sort_order` and then local `id`.
+      security:
+        - InternalApiToken: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantSlug'
+      responses:
+        '200':
+          description: Active categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/restaurants/{restaurant}/categories/{category}/products:
+    get:
+      tags: [Catalog]
+      operationId: listRestaurantCategoryProducts
+      summary: List available products in a category
+      description: |
+        Returns available products attached to the specified active category
+        and belonging to the same restaurant. Products are ordered by
+        `sort_order` and then local `id`.
+      security:
+        - InternalApiToken: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantSlug'
+        - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '200':
+          description: Available category products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/restaurants/{restaurant}/products/search:
+    get:
+      tags: [Catalog]
+      operationId: searchRestaurantProducts
+      summary: Search available restaurant products
+      description: |
+        Searches products for an active restaurant. The query is trimmed before
+        validation. `limit` defaults to 10 and is capped at 50.
+      security:
+        - InternalApiToken: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantSlug'
+        - name: q
+          in: query
+          required: true
+          description: Search text. Leading and trailing whitespace is trimmed.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: pizza
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+          example: 10
+      responses:
+        '200':
+          description: Matching products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/restaurants/{restaurant}/products/{product}:
+    get:
+      tags: [Catalog]
+      operationId: showRestaurantProduct
+      summary: Get a product
+      description: |
+        Returns a product belonging to the specified active restaurant.
+        Unlike catalog/category listing endpoints, this route does not filter
+        the selected product by `is_available`; the current availability flag
+        is returned in the response.
+      security:
+        - InternalApiToken: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantSlug'
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Product details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/restaurants/{restaurant}/catalog:
+    get:
+      tags: [Catalog]
+      operationId: showRestaurantCatalog
+      summary: Get the full active catalog
+      description: |
+        Returns active categories and their currently available products for an
+        active restaurant. Categories and products are ordered by `sort_order`
+        and then local `id`.
+      security:
+        - InternalApiToken: []
+      parameters:
+        - $ref: '#/components/parameters/RestaurantSlug'
+      responses:
+        '200':
+          description: Active restaurant catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/carts:
+    post:
+      tags: [Cart]
+      operationId: createCurrentCart
+      summary: Get or create the current session cart
+      description: |
+        Finds an existing cart for the current session or creates one when none
+        exists.
+
+        Returns `201 Created` when a new cart is created and `200 OK` when the
+        session already has a cart.
+
+        Cart ownership, restaurant, status, currency, totals, expiry and items
+        are backend-controlled and must not be submitted by the client.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      responses:
+        '200':
+          description: Existing cart returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '201':
+          description: New cart created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/carts/current:
+    get:
+      tags: [Cart]
+      operationId: showCurrentCart
+      summary: Get the current session cart
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      responses:
+        '200':
+          description: Current cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/carts/current/items:
+    post:
+      tags: [Cart]
+      operationId: addCurrentCartItem
+      summary: Add a product to the current cart
+      description: |
+        Adds one available restaurant product to the active current cart.
+
+        `unit_price` is selected by the backend using `promotion_price` when
+        present, otherwise the regular product `price`. Cart totals are
+        recalculated by the backend.
+
+        Adding the same product twice is rejected with `409 Conflict`; update
+        the existing cart item quantity instead.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCartItemRequest'
+            example:
+              product_id: 1
+              quantity: 2
+      responses:
+        '201':
+          description: Product added to cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Restaurant, cart or available product was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cart is inactive/expired or product already exists in the cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Cart]
+      operationId: clearCurrentCart
+      summary: Remove all items from the current cart
+      description: Clears all cart items and recalculates totals to zero.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      responses:
+        '200':
+          description: Cart cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/carts/current/items/{item}:
+    patch:
+      tags: [Cart]
+      operationId: updateCurrentCartItem
+      summary: Update cart item quantity
+      description: |
+        Changes the quantity of an existing current-cart item and recalculates
+        its line total and cart totals.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      parameters:
+        - $ref: '#/components/parameters/CartItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCartItemRequest'
+            example:
+              quantity: 3
+      responses:
+        '200':
+          description: Cart item updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Restaurant, cart, cart item or corresponding product was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Cart]
+      operationId: removeCurrentCartItem
+      summary: Remove one item from the current cart
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      parameters:
+        - $ref: '#/components/parameters/CartItemId'
+      responses:
+        '200':
+          description: Cart item removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Create an order from the current cart
+      description: |
+        Checks out the current cart and creates an order.
+
+        The MVP checkout is fixed to pickup and cash. The client provides only
+        `delivery_time`; restaurant, Dots company/address/city identifiers,
+        receiving type, payment type, customer data, cart items, totals and
+        currency are resolved by the backend.
+
+        Before submitting an order, the backend validates cart prices through
+        Dots. The Dots `totalPrice` is authoritative and is persisted as the
+        order total, so the final order total may differ from the local catalog
+        subtotal because of promotions or Dots-side pricing rules.
+
+        `Idempotency-Key` is mandatory. Repeating the same request with the
+        same key and session returns the existing order with `200 OK` and does
+        not submit another order to Dots. A new order returns `201 Created`.
+
+        Dots may accept creation asynchronously. A newly accepted order may
+        initially have status `creating`; `GET /api/orders/current` later
+        refreshes it to `created` when Dots confirms the order.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            examples:
+              asap:
+                summary: ASAP pickup
+                value:
+                  delivery_time: 0
+              scheduled:
+                summary: Scheduled pickup using Unix timestamp
+                value:
+                  delivery_time: 1786442400
+      responses:
+        '200':
+          description: Existing order returned for the same idempotency key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '201':
+          description: New local order created and submitted/accepted for creation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Active restaurant or current cart was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: |
+            Checkout conflict, for example an inactive cart, changed cart,
+            another order already created for the cart, or an idempotency key
+            already belonging to another session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: |
+            Validation or checkout rejection. Examples include an invalid
+            request, expired/empty cart, unavailable product, missing/invalid
+            customer contact, or a definite 4xx rejection from Dots.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Dots returned a server error or invalid response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Connection to the ordering service failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/orders/current:
+    get:
+      tags: [Orders]
+      operationId: showCurrentOrder
+      summary: Get and optionally refresh the current order
+      description: |
+        Returns the current order for the session.
+
+        If the local order is `creating` and has an external Dots order ID, the
+        backend attempts to fetch the order from Dots. A successful Dots
+        response marks the local order as `created`.
+
+        Dots `404`, transient HTTP failures and connection failures during this
+        refresh are intentionally non-fatal: the current local order is
+        returned unchanged, usually still with status `creating`.
+      security:
+        - InternalApiToken: []
+          SessionToken: []
+      responses:
+        '200':
+          description: Current order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No current order exists for the session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    InternalApiToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Api-Token
+      description: Shared secret used by trusted internal services.
+    SessionToken:
+      type: apiKey
+      in: header
+      name: X-Session-Token
+      description: |
+        64-character lowercase hexadecimal token returned by
+        `POST /api/sessions`. The session must exist, be active and unexpired.
+
+  parameters:
+    RestaurantSlug:
+      name: restaurant
+      in: path
+      required: true
+      description: Local restaurant slug.
+      schema:
+        type: string
+        minLength: 1
+      example: papa-jon
+    CategoryId:
+      name: category
+      in: path
+      required: true
+      description: Local numeric category ID.
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+    ProductId:
+      name: product
+      in: path
+      required: true
+      description: Local numeric product ID.
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+    CartItemId:
+      name: item
+      in: path
+      required: true
+      description: Local numeric cart item ID.
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated idempotency key for order creation. Maximum length is
+        128 characters. Reusing the same key in the same session returns the
+        existing order without a second Dots create request.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      example: order-01J5X3MYE73ZZ7C6CPV4RDQBR2
+
+  responses:
+    Unauthorized:
+      description: Missing, malformed, expired or invalid internal/session authentication.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Unauthenticated.
+    NotFound:
+      description: Requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Request conflicts with current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [message]
+      additionalProperties: true
+      properties:
+        message:
+          type: string
+      example:
+        message: Unauthenticated.
+
+    ValidationErrorResponse:
+      type: object
+      required: [message, errors]
+      additionalProperties: true
+      properties:
+        message:
+          type: string
+          example: The given data was invalid.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            quantity:
+              - The quantity field must be at least 1.
+
+    Money:
+      type: string
+      pattern: '^-?\d+\.\d{2}$'
+      description: Decimal monetary amount serialized as a string with two fractional digits.
+      examples: ['100.00', '80.00']
+
+    CreateSessionRequest:
+      type: object
+      required: [channel, external_session_id]
+      additionalProperties: true
+      properties:
+        channel:
+          type: string
+          enum: [chatgpt, telegram, api]
+        external_session_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Client-side conversation/chat/session identifier.
+      description: |
+        `restaurant_id`, `restaurant_slug` and `account_id` are prohibited
+        client fields.
+
+    RestaurantSummary:
+      type: object
+      required: [name, slug, currency, locale, timezone]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: UAH
+        locale:
+          type: string
+          example: uk-UA
+        timezone:
+          type: string
+          example: Europe/Kyiv
+
+    SessionCreated:
+      type: object
+      required:
+        - session_id
+        - session_token
+        - channel
+        - status
+        - expires_at
+        - restaurant
+      properties:
+        session_id:
+          type: string
+          description: Server-generated ULID.
+          pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+        session_token:
+          type: string
+          description: Secret session token.
+          pattern: '^[a-f0-9]{64}$'
+        channel:
+          type: string
+          enum: [chatgpt, telegram, api]
+        status:
+          type: string
+          enum: [active, closed]
+        expires_at:
+          type: string
+          format: date-time
+        restaurant:
+          $ref: '#/components/schemas/RestaurantSummary'
+
+    SessionCreatedResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/SessionCreated'
+
+    UpdateSessionContactRequest:
+      type: object
+      required: [name, phone]
+      additionalProperties: true
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: |
+            Input phone number. Spaces, hyphens and parentheses are removed.
+            `00...`, `380...` and local Ukrainian `0XXXXXXXXX` forms are
+            normalized by the backend when valid.
+      description: |
+        `phone_verified`, `customer_id`, `restaurant_id`, `restaurant_slug`
+        and `account_id` are prohibited client fields.
+
+    Contact:
+      type: object
+      required: [name, phone, phone_verified]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+          example: '+380931234567'
+        phone_verified:
+          type: boolean
+          example: false
+
+    SessionContactData:
+      type: object
+      required: [session_id, contact]
+      properties:
+        session_id:
+          type: string
+        contact:
+          $ref: '#/components/schemas/Contact'
+
+    SessionContactResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/SessionContactData'
+
+    Category:
+      type: object
+      required: [id, external_id, name, slug, sort_order]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        external_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        sort_order:
+          type: integer
+          minimum: 0
+
+    Product:
+      type: object
+      required:
+        - id
+        - external_id
+        - name
+        - description
+        - price
+        - promotion_price
+        - currency
+        - image_url
+        - is_available
+        - sort_order
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        external_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        price:
+          $ref: '#/components/schemas/Money'
+        promotion_price:
+          oneOf:
+            - $ref: '#/components/schemas/Money'
+            - type: 'null'
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: UAH
+        image_url:
+          type: [string, 'null']
+          description: External product image URL when available.
+        is_available:
+          type: boolean
+        sort_order:
+          type: integer
+          minimum: 0
+
+    CatalogCategory:
+      allOf:
+        - $ref: '#/components/schemas/Category'
+        - type: object
+          required: [products]
+          properties:
+            products:
+              type: array
+              items:
+                $ref: '#/components/schemas/Product'
+
+    CategoryCollectionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+
+    ProductCollectionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+
+    ProductResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Product'
+
+    CatalogResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogCategory'
+
+    AddCartItemRequest:
+      type: object
+      required: [product_id, quantity]
+      additionalProperties: true
+      properties:
+        product_id:
+          type: integer
+          minimum: 1
+          description: Local product ID from this API, not the Dots external UUID.
+        quantity:
+          type: integer
+          minimum: 1
+      description: |
+        Backend-controlled cart fields (`cart_id`, `restaurant_id`,
+        `session_id`, `external_product_id`, prices, totals, currency and
+        status) must be absent.
+
+    UpdateCartItemRequest:
+      type: object
+      required: [quantity]
+      additionalProperties: true
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+      description: |
+        Only quantity is client-controlled. Product/cart ownership, prices,
+        totals, currency and status must be absent.
+
+    CartItem:
+      type: object
+      required:
+        - id
+        - product_id
+        - external_product_id
+        - name
+        - quantity
+        - unit_price
+        - total
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        product_id:
+          type: integer
+          minimum: 1
+        external_product_id:
+          type: string
+          description: Dots product identifier stored with the cart item.
+        name:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unit_price:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+
+    Cart:
+      type: object
+      required: [id, status, currency, subtotal, total, expires_at, items]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [active, checked_out, expired]
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: UAH
+        subtotal:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+        expires_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItem'
+
+    CartResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Cart'
+
+    CreateOrderRequest:
+      type: object
+      required: [delivery_time]
+      additionalProperties: true
+      properties:
+        delivery_time:
+          type: integer
+          minimum: 0
+          description: |
+            `0` means ASAP in Dots. A positive value is a future Unix timestamp
+            used to schedule pickup.
+          example: 0
+      description: |
+        MVP checkout is fixed to pickup + cash. The following internal fields
+        must be absent: `idempotency_key`, restaurant/company/address/city
+        identifiers, receiving/delivery/payment types, customer, items, total
+        and currency.
+
+    OrderItem:
+      type: object
+      required:
+        - product_id
+        - external_product_id
+        - name
+        - quantity
+        - unit_price
+        - total
+      properties:
+        product_id:
+          type: [integer, 'null']
+          minimum: 1
+          description: Local product ID snapshot; may become null if the local product is deleted later.
+        external_product_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unit_price:
+          $ref: '#/components/schemas/Money'
+        total:
+          $ref: '#/components/schemas/Money'
+
+    Order:
+      type: object
+      required:
+        - id
+        - external_order_id
+        - status
+        - failure_message
+        - receiving_type
+        - total
+        - currency
+        - items
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        external_order_id:
+          type: [string, 'null']
+          description: Dots order ID when Dots has returned one.
+        status:
+          type: string
+          enum:
+            - draft
+            - creating
+            - created
+            - awaiting_payment
+            - paid
+            - failed
+            - cancelled
+        failure_message:
+          type: [string, 'null']
+          description: Last known creation failure/uncertainty information when present.
+        receiving_type:
+          type: string
+          enum: [pickup]
+        total:
+          $ref: '#/components/schemas/Money'
+          description: Final Dots-validated order total.
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: UAH
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    OrderResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Order'

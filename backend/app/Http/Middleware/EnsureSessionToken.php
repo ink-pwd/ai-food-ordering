@@ -1,0 +1,92 @@
+<?php
+
+namespace App\Http\Middleware;
+
+use App\Enums\SessionChannel;
+use App\Enums\SessionStatus;
+use App\Services\Repositories\SessionRepository;
+use Closure;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Symfony\Component\HttpFoundation\Response;
+
+class EnsureSessionToken
+{
+    public function __construct(
+        private readonly SessionRepository $sessions,
+    ) {}
+
+    /**
+     * Handle an incoming request.
+     *
+     * @param  Closure(Request): (Response)  $next
+     */
+    public function handle(Request $request, Closure $next): Response
+    {
+        $plainToken = $request->headers->get('X-Session-Token');
+
+        if (! is_string($plainToken) || preg_match('/\A[a-f0-9]{64}\z/', $plainToken) !== 1) {
+            return $this->unauthenticated();
+        }
+
+        $session = $this->sessions->findByToken($plainToken);
+
+        if (! $this->isValidSession($session)) {
+            return $this->unauthenticated();
+        }
+
+        $request->attributes->set('internal_session', $session);
+
+        return $next($request);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $session
+     */
+    private function isValidSession(?array $session): bool
+    {
+        if ($session === null) {
+            return false;
+        }
+
+        if (! isset($session['id']) || ! is_string($session['id']) || $session['id'] === '') {
+            return false;
+        }
+
+        if (! isset($session['restaurant_id']) || ! is_int($session['restaurant_id']) || $session['restaurant_id'] < 1) {
+            return false;
+        }
+
+        if (! isset($session['channel']) || ! is_string($session['channel']) || ! SessionChannel::tryFrom($session['channel'])) {
+            return false;
+        }
+
+        if (! array_key_exists('external_session_id', $session) || ! is_string($session['external_session_id'])) {
+            return false;
+        }
+
+        if (($session['status'] ?? null) !== SessionStatus::Active->value) {
+            return false;
+        }
+
+        if (! isset($session['expires_at']) || ! is_string($session['expires_at'])) {
+            return false;
+        }
+
+        try {
+            $expiresAt = Carbon::parse($session['expires_at']);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $expiresAt->isFuture();
+    }
+
+    private function unauthenticated(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Unauthenticated.',
+        ], Response::HTTP_UNAUTHORIZED);
+    }
+}
