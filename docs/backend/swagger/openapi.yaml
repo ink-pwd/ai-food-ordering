@@ -270,16 +270,16 @@ paths:
     post:
       tags: [Cart]
       operationId: createCurrentCart
-      summary: Get or create the current session cart
+      summary: Get or create the current active session cart
+
       description: |
-        Finds an existing cart for the current session or creates one when none
-        exists.
+        Returns the existing active cart for the current restaurant/session.
 
-        Returns `201 Created` when a new cart is created and `200 OK` when the
-        session already has a cart.
+        If no active cart exists, creates a new empty active cart.
+        Historical checked_out and expired carts are never reused.
 
-        Cart ownership, restaurant, status, currency, totals, expiry and items
-        are backend-controlled and must not be submitted by the client.
+        Returns `201 Created` when a new active cart is created and `200 OK`
+        when an active cart already exists.
       security:
         - InternalApiToken: []
           SessionToken: []
@@ -307,7 +307,7 @@ paths:
     get:
       tags: [Cart]
       operationId: showCurrentCart
-      summary: Get the current session cart
+      summary: Get the current active session cart
       security:
         - InternalApiToken: []
           SessionToken: []
@@ -365,7 +365,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Cart is inactive/expired or product already exists in the cart.
+          description: Product already exists in the cart.
           content:
             application/json:
               schema:
