@@ -4,6 +4,8 @@ use App\Enums\CartStatus;
 use App\Enums\SessionChannel;
 use App\Enums\SessionStatus;
 use App\Models\Cart;
+use App\Models\CartItem;
+use App\Models\Product;
 use App\Models\Restaurant;
 use App\Services\Repositories\SessionRepository;
 use Illuminate\Support\Carbon;
@@ -56,6 +58,69 @@ it('returns ok with the same cart id for a repeated valid request', function () 
 
     expect($second->json('data.id'))->toBe($first->json('data.id'))
         ->and(Cart::query()->count())->toBe(1);
+});
+
+it('creates a fresh empty cart without changing checked out cart history', function () {
+    $restaurant = Restaurant::factory()->create(['currency' => 'UAH']);
+    $sessionId = cartApiSession()['id'];
+    storeCartApiSession(cartApiToken(), ['restaurant_id' => $restaurant->id]);
+
+    $historicalCart = Cart::factory()->for($restaurant)->create([
+        'session_id' => $sessionId,
+        'status' => CartStatus::CheckedOut,
+        'subtotal' => '75.50',
+        'total' => '75.50',
+    ]);
+    $product = Product::factory()->for($restaurant)->create();
+    $historicalItem = CartItem::factory()
+        ->for($historicalCart)
+        ->for($product)
+        ->create([
+            'quantity' => 2,
+            'unit_price' => '37.75',
+            'total' => '75.50',
+        ]);
+
+    $response = authorizedCartRequest()
+        ->assertCreated()
+        ->assertJsonPath('data.status', CartStatus::Active->value)
+        ->assertJsonPath('data.subtotal', '0.00')
+        ->assertJsonPath('data.total', '0.00')
+        ->assertJsonPath('data.items', []);
+
+    $newCart = Cart::query()->findOrFail($response->json('data.id'));
+
+    expect($newCart->id)->not->toBe($historicalCart->id)
+        ->and($newCart->status)->toBe(CartStatus::Active)
+        ->and($newCart->subtotal)->toBe('0.00')
+        ->and($newCart->total)->toBe('0.00')
+        ->and($newCart->items)->toBeEmpty()
+        ->and($historicalCart->refresh()->status)->toBe(CartStatus::CheckedOut)
+        ->and($historicalCart->subtotal)->toBe('75.50')
+        ->and($historicalCart->total)->toBe('75.50')
+        ->and($historicalItem->refresh()->quantity)->toBe(2)
+        ->and($historicalItem->unit_price)->toBe('37.75')
+        ->and($historicalItem->total)->toBe('75.50');
+});
+
+it('does not reuse an expired cart', function () {
+    $restaurant = Restaurant::factory()->create();
+    $sessionId = cartApiSession()['id'];
+    storeCartApiSession(cartApiToken(), ['restaurant_id' => $restaurant->id]);
+
+    $expiredCart = Cart::factory()->for($restaurant)->create([
+        'session_id' => $sessionId,
+        'status' => CartStatus::Expired,
+        'expires_at' => now()->subMinute(),
+    ]);
+
+    $response = authorizedCartRequest()
+        ->assertCreated()
+        ->assertJsonPath('data.status', CartStatus::Active->value);
+
+    expect($response->json('data.id'))->not->toBe($expiredCart->id)
+        ->and($expiredCart->refresh()->status)->toBe(CartStatus::Expired)
+        ->and(Cart::query()->where('session_id', $sessionId)->count())->toBe(2);
 });
 
 it('requires the internal api middleware', function () {

@@ -187,7 +187,7 @@ it('rejects a missing cart', function () {
     expect(CartItem::query()->count())->toBe(0);
 });
 
-it('rejects a checked out cart', function () {
+it('does not add items to a checked out historical cart', function () {
     [, $cart, $product] = cartItemApiContext();
 
     $cart->update([
@@ -197,7 +197,7 @@ it('rejects a checked out cart', function () {
     authorizedCartItemRequest([
         'product_id' => $product->id,
         'quantity' => 1,
-    ])->assertConflict();
+    ])->assertNotFound();
 
     expect($cart->items()->count())->toBe(0);
 });

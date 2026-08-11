@@ -340,8 +340,8 @@ php artisan test --compact
 The current test suite contains:
 
 ```text
-369 tests
-1211 assertions
+375 tests
+1243 assertions
 ```
 
 The test suite covers the application's main business flows, including:
@@ -481,6 +481,9 @@ A session owns the selected restaurant and cart context, so internal clients do 
 * external product identifiers.
 
 These values are resolved and validated by the backend.
+
+A session may retain multiple historical carts, while only one cart can
+be active for the selected restaurant at a time.
 
 ---
 

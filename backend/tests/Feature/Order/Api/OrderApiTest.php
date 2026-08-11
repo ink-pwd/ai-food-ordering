@@ -61,6 +61,7 @@ it('creates an order using the total validated by Dots', function () {
     expect($order->total)->toBe('80.00')
         ->and($order->external_order_id)->toBe($externalOrderId)
         ->and($order->status)->toBe(OrderStatus::Creating)
+        ->and($order->cart_id)->toBe($scenario['cart']->id)
         ->and($order->items)->toHaveCount(1)
         ->and($scenario['cart']->refresh()->status)
         ->toBe(CartStatus::CheckedOut);

@@ -231,7 +231,7 @@ it('allows clearing an already empty cart', function () {
         ->assertJsonPath('data.total', '0.00');
 });
 
-it('rejects mutations for a checked out cart', function () {
+it('does not mutate a checked out historical cart', function () {
     [, $cart, , $item] = cartMutationApiContext();
 
     $cart->update([
@@ -240,14 +240,14 @@ it('rejects mutations for a checked out cart', function () {
 
     authorizedCartMutationPatch($item->id, [
         'quantity' => 2,
-    ])->assertConflict();
+    ])->assertNotFound();
 
     authorizedCartMutationDeleteItem(
         $item->id,
-    )->assertConflict();
+    )->assertNotFound();
 
     authorizedCartMutationClear()
-        ->assertConflict();
+        ->assertNotFound();
 
     expect($item->fresh())->not->toBeNull();
 });

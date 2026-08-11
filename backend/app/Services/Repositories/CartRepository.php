@@ -19,6 +19,7 @@ class CartRepository
         $existingCart = Cart::query()
             ->where('restaurant_id', $restaurant->id)
             ->where('session_id', $sessionId)
+            ->where('status', CartStatus::Active)
             ->first();
 
         if ($existingCart) {
@@ -32,9 +33,9 @@ class CartRepository
             [
                 'restaurant_id' => $restaurant->id,
                 'session_id' => $sessionId,
+                'status' => CartStatus::Active,
             ],
             [
-                'status' => CartStatus::Active,
                 'currency' => $restaurant->currency,
                 'subtotal' => 0,
                 'total' => 0,
@@ -53,6 +54,7 @@ class CartRepository
         return Cart::query()
             ->where('restaurant_id', $restaurant->id)
             ->where('session_id', $sessionId)
+            ->where('status', CartStatus::Active)
             ->with([
                 'items' => fn ($query) => $query
                     ->orderBy('id')
@@ -66,6 +68,7 @@ class CartRepository
         return Cart::query()
             ->where('restaurant_id', $restaurant->id)
             ->where('session_id', $sessionId)
+            ->where('status', CartStatus::Active)
             ->lockForUpdate()
             ->first();
     }

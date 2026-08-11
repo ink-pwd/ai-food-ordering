@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CartStatus;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Product;
@@ -200,12 +201,14 @@ it('completes the order flow with mocked Dots API', function () {
         ->toBe(1);
 
     /*
-     * 7. Accepted order checks out the cart.
+     * 7. Accepted order checks out the historical cart, leaving no current cart.
      */
     $this->withHeaders($headers)
         ->getJson('/api/carts/current')
-        ->assertOk()
-        ->assertJsonPath('data.status', 'checked_out');
+        ->assertNotFound();
+
+    expect(Order::query()->with('cart')->sole()->cart->status)
+        ->toBe(CartStatus::CheckedOut);
 
     /*
      * 8. Refresh order status.
