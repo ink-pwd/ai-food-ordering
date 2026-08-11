@@ -73,6 +73,16 @@ services:
     depends_on:
       - db
 
+  telegram-bot:
+    image: webdevops/php-nginx:8.5-alpine
+    container_name: food-ordering-telegram
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - ./telegram-bot:/app
+    depends_on:
+      - app
+
 volumes:
   database-data:
   redis-data:
