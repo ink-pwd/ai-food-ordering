@@ -73,6 +73,21 @@ services:
     depends_on:
       - db
 
+  mcp-server:
+    image: webdevops/php-nginx:8.5-alpine
+    container_name: food-ordering-mcp
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    volumes:
+      - ./mcp-server:/app
+    environment:
+      WEB_DOCUMENT_ROOT: /app/public
+      PHP_DISPLAY_ERRORS: 1
+    depends_on:
+      - app
+
   telegram-bot:
     image: webdevops/php-nginx:8.5-alpine
     container_name: food-ordering-telegram
