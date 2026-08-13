@@ -95,6 +95,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./telegram-bot:/app
+    command: [ "php", "artisan", "nutgram:run" ]
     depends_on:
       - app
 
