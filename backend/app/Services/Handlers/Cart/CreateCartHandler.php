@@ -5,6 +5,8 @@ namespace App\Services\Handlers\Cart;
 use App\Models\Cart;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Support\FulfillmentSelection;
+use App\Services\Support\SessionSelection;
 use Illuminate\Support\Carbon;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -21,11 +23,13 @@ class CreateCartHandler
      */
     public function handle(array $session): array
     {
-        $restaurant = $this->restaurants->findActiveById($session['restaurant_id']);
+        $restaurant = $this->restaurants->findActiveById(SessionSelection::restaurantId($session));
 
         if ($restaurant === null) {
             throw new NotFoundHttpException;
         }
+
+        FulfillmentSelection::assertReady($session);
 
         return $this->carts->findOrCreateForSession(
             $restaurant,

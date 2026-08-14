@@ -7,6 +7,7 @@ use App\Models\Cart;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\ProductRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -28,7 +29,7 @@ class UpdateCartItemHandler
         int $quantity,
     ): Cart {
         $restaurant = $this->restaurants->findActiveById(
-            $session['restaurant_id'],
+            SessionSelection::restaurantId($session),
         );
 
         if ($restaurant === null) {

@@ -68,6 +68,21 @@ return [
         'session_key_prefix' => env('INTERNAL_SESSION_KEY_PREFIX', 'internal-session'),
 
         'restaurant_slug' => env('INTERNAL_RESTAURANT_SLUG'),
+
+        'otp' => [
+            'delivery_driver' => env('INTERNAL_OTP_DELIVERY_DRIVER', 'log'),
+            'code_length' => (int) env('INTERNAL_OTP_CODE_LENGTH', 6),
+            'ttl_seconds' => (int) env('INTERNAL_OTP_TTL_SECONDS', 300),
+            'resend_cooldown_seconds' => (int) env('INTERNAL_OTP_RESEND_COOLDOWN_SECONDS', 60),
+            'max_attempts' => (int) env('INTERNAL_OTP_MAX_ATTEMPTS', 5),
+            'store' => env('INTERNAL_OTP_STORE', 'redis'),
+            'key_prefix' => env('INTERNAL_OTP_KEY_PREFIX', 'internal-session-otp'),
+        ],
+
+        'payment' => [
+            'wait_seconds' => (float) env('INTERNAL_PAYMENT_WAIT_SECONDS', 5),
+            'poll_interval_ms' => (int) env('INTERNAL_PAYMENT_POLL_INTERVAL_MS', 500),
+        ],
     ],
 
 ];

@@ -15,6 +15,7 @@ class OrderStoreController extends Controller
     ): OrderResponse {
         $result = $createOrder->handle(
             $request->internalSession(),
+            $request->sessionToken(),
             $request->idempotencyKey(),
             $request->deliveryTime(),
         );

@@ -22,8 +22,17 @@ class OrderResponse implements Responsable
                 'status' => $this->order->status->value,
                 'failure_message' => $this->order->failure_message,
                 'receiving_type' => $this->order->receiving_type->value,
+                'payment_type' => $this->order->payment_type,
+                'fulfillment' => $this->order->fulfillment_snapshot,
                 'total' => $this->order->total,
                 'currency' => $this->order->currency,
+                'payment' => [
+                    'status' => $this->order->payment_checkout_url === null ? 'pending' : 'ready',
+                    'checkout_url' => $this->order->payment_checkout_url,
+                    'payment_received_at' => $this->order->payment_received_at?->toIso8601String(),
+                    'qr_ready' => $this->order->payment_qr_path !== null
+                        && $this->order->payment_qr_fingerprint !== null,
+                ],
                 'items' => $this->order->items->map(static fn ($item): array => [
                     'product_id' => $item->product_id,
                     'external_product_id' => $item->external_product_id,

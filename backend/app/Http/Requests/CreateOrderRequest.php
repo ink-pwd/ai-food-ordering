@@ -19,8 +19,7 @@ class CreateOrderRequest extends FormRequest
     }
 
     /**
-     * MVP checkout is fixed to pickup + cash.
-     * delivery_time = 0 means ASAP in Dots; a future Unix timestamp schedules pickup.
+     * delivery_time = 0 means ASAP in Dots; a future Unix timestamp schedules fulfillment.
      *
      * @return array<string, array<int, string>>
      */
@@ -54,6 +53,11 @@ class CreateOrderRequest extends FormRequest
     public function deliveryTime(): int
     {
         return (int) ($this->validated('delivery_time') ?? 0);
+    }
+
+    public function sessionToken(): string
+    {
+        return (string) $this->headers->get('X-Session-Token');
     }
 
     /**

@@ -9,7 +9,7 @@ use Symfony\Component\HttpFoundation\Response;
 class SessionCreatedResponse implements Responsable
 {
     /**
-     * @param  array{token: string, session: array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}, restaurant: array{name: string, slug: string, currency: string, locale: string, timezone: string}}  $createdSession
+     * @param  array{token: string, session: array{id: string, city_id: int|null, restaurant_id: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}}  $createdSession
      */
     public function __construct(
         private readonly array $createdSession,
@@ -25,7 +25,8 @@ class SessionCreatedResponse implements Responsable
                 'channel' => $this->createdSession['session']['channel'],
                 'status' => $this->createdSession['session']['status'],
                 'expires_at' => $this->createdSession['session']['expires_at'],
-                'restaurant' => $this->createdSession['restaurant'],
+                'city' => null,
+                'restaurant' => null,
             ],
         ], Response::HTTP_CREATED);
     }

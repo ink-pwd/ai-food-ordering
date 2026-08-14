@@ -2,6 +2,7 @@
 
 namespace App\Services\Repositories;
 
+use App\Enums\SessionStatus;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
@@ -13,7 +14,7 @@ class SessionRepository
     ) {}
 
     /**
-     * @param  array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}  $session
+     * @param  array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}  $session
      */
     public function put(string $plainToken, array $session): void
     {
@@ -25,7 +26,7 @@ class SessionRepository
     }
 
     /**
-     * @return array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
      */
     public function findByToken(string $plainToken): ?array
     {
@@ -40,9 +41,74 @@ class SessionRepository
 
     /**
      * @param  array<string, mixed>  $metadata
-     * @return array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
      */
     public function updateMetadata(string $plainToken, array $metadata): ?array
+    {
+        return $this->mutateActive($plainToken, function (array $session) use ($metadata): array {
+            $session['metadata'] = array_merge($session['metadata'] ?? [], $metadata);
+
+            return $session;
+        });
+    }
+
+    /**
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     */
+    public function selectCity(string $plainToken, int $cityId): ?array
+    {
+        return $this->mutateActive($plainToken, function (array $session) use ($cityId): array {
+            $session['city_id'] = $cityId;
+
+            return $session;
+        });
+    }
+
+    /**
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     */
+    public function selectRestaurant(string $plainToken, int $restaurantId): ?array
+    {
+        return $this->mutateActive($plainToken, function (array $session) use ($restaurantId): array {
+            $session['restaurant_id'] = $restaurantId;
+
+            return $session;
+        });
+    }
+
+    /**
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, fulfillment?: array<string, mixed>|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     */
+    public function updateFulfillment(string $plainToken, ?array $fulfillment): ?array
+    {
+        return $this->mutateActive($plainToken, function (array $session) use ($fulfillment): array {
+            $session['fulfillment'] = $fulfillment;
+
+            return $session;
+        });
+    }
+
+    /**
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     */
+    public function close(string $plainToken): ?array
+    {
+        return $this->mutateActive($plainToken, function (array $session): array {
+            $session['status'] = SessionStatus::Closed->value;
+
+            return $session;
+        });
+    }
+
+    public function deleteByToken(string $plainToken): bool
+    {
+        return $this->store()->forget($this->cacheKey($plainToken));
+    }
+
+    /**
+     * @return array{id: string, city_id?: int|null, restaurant_id?: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}|null
+     */
+    private function mutateActive(string $plainToken, callable $callback): ?array
     {
         $session = $this->findByToken($plainToken);
 
@@ -59,7 +125,7 @@ class SessionRepository
             return null;
         }
 
-        $session['metadata'] = array_merge($session['metadata'] ?? [], $metadata);
+        $session = $callback($session);
 
         $this->store()->put(
             $this->cacheKey($plainToken),
@@ -68,11 +134,6 @@ class SessionRepository
         );
 
         return $session;
-    }
-
-    public function deleteByToken(string $plainToken): bool
-    {
-        return $this->store()->forget($this->cacheKey($plainToken));
     }
 
     private function cacheKey(string $plainToken): string

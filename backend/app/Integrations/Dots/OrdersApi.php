@@ -29,4 +29,14 @@ class OrdersApi
             "/api/v2/orders/{$orderId}",
         );
     }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getOnlinePaymentData(string $orderId): array
+    {
+        return $this->dotsClient->authenticatedGet(
+            "/api/v2/orders/{$orderId}/online-payment-data",
+        );
+    }
 }

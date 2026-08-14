@@ -7,6 +7,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Product;
 use App\Models\Restaurant;
+use App\Models\RestaurantAddress;
 use App\Services\Repositories\SessionRepository;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -216,6 +217,15 @@ it('returns not found when the session restaurant is missing or inactive', funct
     'inactive' => [['is_active' => false], 0],
 ]);
 
+it('fails cleanly when the session has no selected restaurant', function () {
+    storeCartApiSession(cartApiToken(), ['restaurant_id' => null]);
+
+    authorizedCartRequest()->assertConflict()
+        ->assertJsonPath('message', 'Restaurant must be selected.');
+
+    expect(Cart::query()->count())->toBe(0);
+});
+
 it('returns money values as two decimal strings', function () {
     $restaurant = Restaurant::factory()->create();
     storeCartApiSession(cartApiToken(), ['restaurant_id' => $restaurant->id]);
@@ -303,6 +313,25 @@ function authorizedCartRequest(array $payload = []): TestResponse
 
 function storeCartApiSession(string $plainToken, array $overrides = []): void
 {
+    if (isset($overrides['restaurant_id']) && ! array_key_exists('fulfillment', $overrides)) {
+        $restaurant = Restaurant::query()->find($overrides['restaurant_id']);
+
+        if ($restaurant !== null) {
+            $address = RestaurantAddress::factory()->create([
+                'restaurant_id' => $restaurant->id,
+                'is_active' => true,
+            ]);
+            $overrides['fulfillment'] = [
+                'type' => 'pickup',
+                'dots_delivery_type' => null,
+                'delivery_price' => null,
+                'delivery_address' => null,
+                'restaurant_address_id' => $address->id,
+                'external_address_id' => $address->external_address_id,
+            ];
+        }
+    }
+
     app(SessionRepository::class)->put($plainToken, cartApiSession($overrides));
 }
 

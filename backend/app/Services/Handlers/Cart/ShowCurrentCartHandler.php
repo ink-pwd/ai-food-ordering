@@ -5,6 +5,7 @@ namespace App\Services\Handlers\Cart;
 use App\Models\Cart;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Support\SessionSelection;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class ShowCurrentCartHandler
@@ -19,7 +20,7 @@ class ShowCurrentCartHandler
      */
     public function handle(array $session): Cart
     {
-        $restaurant = $this->restaurants->findActiveById($session['restaurant_id']);
+        $restaurant = $this->restaurants->findActiveById(SessionSelection::restaurantId($session));
 
         if ($restaurant === null) {
             throw new NotFoundHttpException;

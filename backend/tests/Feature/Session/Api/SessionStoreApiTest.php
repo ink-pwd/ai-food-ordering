@@ -1,7 +1,6 @@
 <?php
 
 use App\Enums\SessionChannel;
-use App\Models\Restaurant;
 use App\Services\Repositories\SessionRepository;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -12,21 +11,20 @@ beforeEach(function () {
     config()->set('services.internal.session_store', 'array');
     config()->set('services.internal.session_ttl_seconds', 60);
     config()->set('services.internal.session_key_prefix', 'test-session');
-    config()->set('services.internal.restaurant_slug', 'pizza-house');
 });
 
 afterEach(function () {
     Carbon::setTestNow();
 });
 
-it('creates sessions for valid channels', function (SessionChannel $channel) {
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
-
+it('creates sessions for valid channels without a preselected restaurant', function (SessionChannel $channel) {
     authorizedSessionStoreRequest([
         'channel' => $channel->value,
         'external_session_id' => 'external-conversation-id',
     ])->assertCreated()
-        ->assertJsonPath('data.channel', $channel->value);
+        ->assertJsonPath('data.channel', $channel->value)
+        ->assertJsonPath('data.city', null)
+        ->assertJsonPath('data.restaurant', null);
 })->with([
     'chatgpt' => [SessionChannel::ChatGPT],
     'telegram' => [SessionChannel::Telegram],
@@ -34,8 +32,6 @@ it('creates sessions for valid channels', function (SessionChannel $channel) {
 ]);
 
 it('rejects client provided restaurant and account fields', function (string $field) {
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
-
     authorizedSessionStoreRequest([
         'channel' => 'chatgpt',
         'external_session_id' => 'external-conversation-id',
@@ -49,8 +45,6 @@ it('rejects client provided restaurant and account fields', function (string $fi
 ]);
 
 it('rejects an invalid channel', function () {
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
-
     authorizedSessionStoreRequest([
         'channel' => 'web',
         'external_session_id' => 'external-conversation-id',
@@ -59,8 +53,6 @@ it('rejects an invalid channel', function () {
 });
 
 it('rejects a missing or oversized external session id', function (array $payload) {
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
-
     authorizedSessionStoreRequest($payload)->assertUnprocessable()
         ->assertJsonValidationErrors(['external_session_id']);
 })->with([
@@ -69,8 +61,6 @@ it('rejects a missing or oversized external session id', function (array $payloa
 ]);
 
 it('returns unauthorized when the internal token is missing', function () {
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
-
     $this->postJson(route('internal.sessions.store'), [
         'channel' => 'chatgpt',
         'external_session_id' => 'external-conversation-id',
@@ -81,8 +71,6 @@ it('returns unauthorized when the internal token is missing', function () {
 });
 
 it('returns unauthorized when the internal token is wrong', function () {
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
-
     $this->withHeader('X-Internal-Api-Token', 'wrong-token')
         ->postJson(route('internal.sessions.store'), [
             'channel' => 'chatgpt',
@@ -93,39 +81,9 @@ it('returns unauthorized when the internal token is wrong', function () {
         ]);
 });
 
-it('returns generic service unavailable when restaurant configuration is missing', function () {
-    config()->set('services.internal.restaurant_slug', null);
-
-    authorizedSessionStoreRequest([
-        'channel' => 'chatgpt',
-        'external_session_id' => 'external-conversation-id',
-    ])->assertServiceUnavailable()
-        ->assertExactJson([
-            'message' => 'Session service unavailable.',
-        ]);
-});
-
-it('returns generic service unavailable when configured restaurant is missing or inactive', function (array $attributes = []) {
-    if ($attributes !== []) {
-        Restaurant::factory()->create($attributes);
-    }
-
-    authorizedSessionStoreRequest([
-        'channel' => 'chatgpt',
-        'external_session_id' => 'external-conversation-id',
-    ])->assertServiceUnavailable()
-        ->assertExactJson([
-            'message' => 'Session service unavailable.',
-        ]);
-})->with([
-    'missing' => [[]],
-    'inactive' => [['slug' => 'pizza-house', 'is_active' => false]],
-]);
-
 it('uses the configured ttl and expiration time', function () {
     Carbon::setTestNow('2026-08-07 12:00:00');
     config()->set('services.internal.session_ttl_seconds', 5);
-    Restaurant::factory()->create(['slug' => 'pizza-house']);
 
     $response = authorizedSessionStoreRequest([
         'channel' => 'api',
@@ -144,15 +102,6 @@ it('returns only safe response fields', function () {
     config()->set('services.dots.token', 'dots-public-token');
     config()->set('services.dots.account_token', 'dots-account-token');
     config()->set('services.dots.auth_token', 'dots-auth-token');
-    Restaurant::factory()->create([
-        'slug' => 'pizza-house',
-        'name' => 'Pizza House',
-        'currency' => 'UAH',
-        'locale' => 'uk-UA',
-        'timezone' => 'Europe/Kyiv',
-        'external_company_id' => '11111111-1111-1111-1111-111111111111',
-    ]);
-
     $response = authorizedSessionStoreRequest([
         'channel' => 'chatgpt',
         'external_session_id' => 'secret-external-conversation-id',
@@ -164,7 +113,8 @@ it('returns only safe response fields', function () {
                 'channel',
                 'status',
                 'expires_at',
-                'restaurant' => ['name', 'slug', 'currency', 'locale', 'timezone'],
+                'city',
+                'restaurant',
             ],
         ]);
 
@@ -174,6 +124,7 @@ it('returns only safe response fields', function () {
         'channel',
         'status',
         'expires_at',
+        'city',
         'restaurant',
     ])->and(array_keys($response->json('data')))->toBe([
         'session_id',
@@ -181,14 +132,10 @@ it('returns only safe response fields', function () {
         'channel',
         'status',
         'expires_at',
+        'city',
         'restaurant',
-    ])->and(array_keys($response->json('data.restaurant')))->toBe([
-        'name',
-        'slug',
-        'currency',
-        'locale',
-        'timezone',
-    ])->and($response->getContent())
+    ])->and($response->json('data.city'))->toBeNull()
+        ->and($response->json('data.restaurant'))->toBeNull()->and($response->getContent())
         ->not->toContain('restaurant_id')
         ->not->toContain('external_session_id')
         ->not->toContain('secret-external-conversation-id')

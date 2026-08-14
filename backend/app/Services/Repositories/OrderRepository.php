@@ -18,10 +18,12 @@ class OrderRepository
         SessionChannel $channel,
         OrderStatus $status,
         ReceivingType $receivingType,
+        int $paymentType,
         string $customerName,
         string $customerPhone,
         string $total,
         string $currency,
+        ?array $fulfillmentSnapshot = null,
         ?array $requestPayload = null,
     ): Order {
         return Order::query()->create([
@@ -33,10 +35,12 @@ class OrderRepository
             'channel' => $channel,
             'status' => $status,
             'receiving_type' => $receivingType,
+            'payment_type' => $paymentType,
             'customer_name' => $customerName,
             'customer_phone' => $customerPhone,
             'total' => $total,
             'currency' => $currency,
+            'fulfillment_snapshot' => $fulfillmentSnapshot,
             'request_payload' => $requestPayload,
             'response_payload' => null,
             'failure_message' => null,
@@ -165,6 +169,29 @@ class OrderRepository
             'failure_message' => $message,
         ]);
 
+        $order->save();
+
+        return $order;
+    }
+
+    public function markPaymentReady(Order $order, string $checkoutUrl, array $paymentSnapshot): Order
+    {
+        $order->fill([
+            'payment_checkout_url' => $checkoutUrl,
+            'payment_snapshot' => $paymentSnapshot,
+            'payment_received_at' => now(),
+        ]);
+        $order->save();
+
+        return $order;
+    }
+
+    public function markPaymentQrReady(Order $order, string $path, string $fingerprint): Order
+    {
+        $order->fill([
+            'payment_qr_path' => $path,
+            'payment_qr_fingerprint' => $fingerprint,
+        ]);
         $order->save();
 
         return $order;

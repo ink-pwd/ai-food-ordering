@@ -6,16 +6,34 @@ use App\Http\Controllers\Api\Cart\CartItemStoreController;
 use App\Http\Controllers\Api\Cart\CartItemUpdateController;
 use App\Http\Controllers\Api\Cart\CartShowController;
 use App\Http\Controllers\Api\Cart\CartStoreController;
+use App\Http\Controllers\Api\City\CityIndexController;
 use App\Http\Controllers\Api\Order\OrderCurrentController;
+use App\Http\Controllers\Api\Order\OrderPaymentController;
+use App\Http\Controllers\Api\Order\OrderPaymentQrController;
 use App\Http\Controllers\Api\Order\OrderStoreController;
 use App\Http\Controllers\Api\Restaurant\RestaurantCatalogController;
 use App\Http\Controllers\Api\Restaurant\RestaurantCategoryController;
 use App\Http\Controllers\Api\Restaurant\RestaurantCategoryProductController;
 use App\Http\Controllers\Api\Restaurant\RestaurantProductController;
 use App\Http\Controllers\Api\Restaurant\RestaurantProductSearchController;
+use App\Http\Controllers\Api\Session\SessionCityController;
 use App\Http\Controllers\Api\Session\SessionContactController;
+use App\Http\Controllers\Api\Session\SessionDeliveryAddressController;
+use App\Http\Controllers\Api\Session\SessionExitController;
+use App\Http\Controllers\Api\Session\SessionFulfillmentController;
+use App\Http\Controllers\Api\Session\SessionFulfillmentOptionsController;
+use App\Http\Controllers\Api\Session\SessionOtpController;
+use App\Http\Controllers\Api\Session\SessionOtpVerifyController;
+use App\Http\Controllers\Api\Session\SessionPickupAddressController;
+use App\Http\Controllers\Api\Session\SessionPickupAddressIndexController;
+use App\Http\Controllers\Api\Session\SessionRestaurantController;
+use App\Http\Controllers\Api\Session\SessionRestaurantIndexController;
 use App\Http\Controllers\Api\Session\SessionStoreController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('cities', CityIndexController::class)
+    ->middleware('internal.api')
+    ->name('internal.cities.index');
 
 Route::post('carts', CartStoreController::class)
     ->middleware(['internal.api', 'internal.session'])
@@ -32,6 +50,50 @@ Route::post('sessions', SessionStoreController::class)
 Route::put('sessions/current/contact', SessionContactController::class)
     ->middleware(['internal.api', 'internal.session'])
     ->name('internal.sessions.contact.update');
+
+Route::post('sessions/current/otp', SessionOtpController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.otp.store');
+
+Route::post('sessions/current/otp/verify', SessionOtpVerifyController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.otp.verify');
+
+Route::put('sessions/current/city', SessionCityController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.city.update');
+
+Route::get('sessions/current/restaurants', SessionRestaurantIndexController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.restaurants.index');
+
+Route::put('sessions/current/restaurant', SessionRestaurantController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.restaurant.update');
+
+Route::delete('sessions/current', SessionExitController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.current.destroy');
+
+Route::get('sessions/current/fulfillment-options', SessionFulfillmentOptionsController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.fulfillment-options.index');
+
+Route::put('sessions/current/fulfillment', SessionFulfillmentController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.fulfillment.update');
+
+Route::get('sessions/current/pickup-addresses', SessionPickupAddressIndexController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.pickup-addresses.index');
+
+Route::put('sessions/current/pickup-address', SessionPickupAddressController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.pickup-address.update');
+
+Route::post('sessions/current/delivery-address', SessionDeliveryAddressController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.delivery-address.store');
 
 Route::get('restaurants/{restaurant}/categories', [RestaurantCategoryController::class, 'index'])
     ->middleware('internal.api')
@@ -89,3 +151,11 @@ Route::post('orders', OrderStoreController::class)
 Route::get('orders/current', OrderCurrentController::class)
     ->middleware(['internal.api', 'internal.session'])
     ->name('internal.orders.current.show');
+
+Route::get('orders/current/payment', OrderPaymentController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.orders.current.payment.show');
+
+Route::get('orders/current/payment/qr', OrderPaymentQrController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.orders.current.payment.qr.show');

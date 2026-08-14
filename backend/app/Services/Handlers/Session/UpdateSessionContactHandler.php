@@ -2,12 +2,14 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\Services\Repositories\OtpChallengeRepository;
 use App\Services\Repositories\SessionRepository;
 
 class UpdateSessionContactHandler
 {
     public function __construct(
         private readonly SessionRepository $sessions,
+        private readonly OtpChallengeRepository $otps,
     ) {}
 
     /**
@@ -15,6 +17,12 @@ class UpdateSessionContactHandler
      */
     public function handle(string $plainToken, string $name, string $normalizedPhone): ?array
     {
+        $session = $this->sessions->findByToken($plainToken);
+
+        if ($session !== null) {
+            $this->otps->forget($session['id']);
+        }
+
         return $this->sessions->updateMetadata($plainToken, [
             'contact' => [
                 'name' => $name,

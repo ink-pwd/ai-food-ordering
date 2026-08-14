@@ -117,6 +117,7 @@ class DotsClient
             ->withHeaders([
                 'Api-Token' => config('services.dots.token'),
                 'Api-Account-Token' => config('services.dots.account_token'),
+                'Api-lang' => 'ua',
             ])
             ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)
             ->timeout(self::REQUEST_TIMEOUT_SECONDS);

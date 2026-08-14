@@ -3,17 +3,26 @@
 namespace App\Services\Handlers\Order;
 
 use App\Enums\CartStatus;
+use App\Enums\FulfillmentType;
 use App\Enums\OrderStatus;
 use App\Enums\ReceivingType;
 use App\Enums\SessionChannel;
 use App\Integrations\Dots\CartPricesApi;
+use App\Integrations\Dots\FulfillmentApi;
 use App\Integrations\Dots\OrdersApi;
 use App\Models\Cart;
+use App\Models\City;
 use App\Models\Order;
 use App\Models\Restaurant;
+use App\Models\RestaurantAddress;
 use App\Services\Repositories\CartRepository;
+use App\Services\Repositories\CityRepository;
 use App\Services\Repositories\OrderRepository;
+use App\Services\Repositories\RestaurantAddressRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Repositories\SessionRepository;
+use App\Services\Support\FulfillmentSelection;
+use App\Services\Support\SessionSelection;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
@@ -27,32 +36,41 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class CreateOrderHandler
 {
+    private const int ONLINE_PAYMENT_TYPE = 2;
+
     public function __construct(
+        private readonly CityRepository $cities,
         private readonly RestaurantRepository $restaurants,
+        private readonly RestaurantAddressRepository $addresses,
         private readonly CartRepository $carts,
         private readonly OrderRepository $orders,
+        private readonly SessionRepository $sessions,
         private readonly CartPricesApi $cartPrices,
         private readonly OrdersApi $dotsOrders,
+        private readonly FulfillmentApi $fulfillmentApi,
+        private readonly ResolveOrderPaymentHandler $payments,
     ) {}
 
     /**
-     * @param  array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}  $session
+     * @param  array<string, mixed>  $session
      * @return array{order: Order, created: bool}
      */
-    public function handle(
-        array $session,
-        string $idempotencyKey,
-        int $deliveryTime,
-    ): array {
+    public function handle(array $session, string $plainToken, string $idempotencyKey, int $deliveryTime): array
+    {
         if ($existing = $this->findExistingOrder($idempotencyKey, $session['id'])) {
+            if ($existing->payment_checkout_url === null && $existing->external_order_id !== null) {
+                $existing = $this->payments->handle($existing)['order'];
+            }
+
             return $this->result($existing, false);
         }
 
-        $restaurant = $this->restaurants->findActiveById($session['restaurant_id']);
+        SessionSelection::assertPhoneVerified($session);
+        FulfillmentSelection::assertReady($session);
 
-        if ($restaurant === null) {
-            throw new NotFoundHttpException;
-        }
+        $city = $this->resolveCity($session);
+        $restaurant = $this->resolveRestaurant($session, $city);
+        $this->assertOnlinePaymentSupported($restaurant);
 
         $cart = $this->carts->findForSession($restaurant, $session['id']);
 
@@ -63,20 +81,20 @@ class CreateOrderHandler
         $this->assertCartCanCheckout($cart);
         [$customerName, $customerPhone] = $this->contact($session);
 
-        $payload = $this->buildPayload(
-            $restaurant,
-            $cart,
-            $customerName,
-            $customerPhone,
-            $deliveryTime,
-        );
+        $context = $this->checkoutContext($plainToken, $session, $city, $restaurant);
+        $payload = $this->buildPayload($context, $cart, $customerName, $customerPhone, $deliveryTime);
+        $priceValidation = $this->validatePrices($payload);
+        $validatedTotal = $this->validatedTotal($priceValidation);
+        $snapshot = $this->fulfillmentSnapshot($context, $priceValidation);
 
         $localResult = $this->createLocalOrder(
             restaurant: $restaurant,
             session: $session,
             idempotencyKey: $idempotencyKey,
             payload: $payload,
-            validatedTotal: $this->validatedTotal($this->validatePrices($payload)),
+            fulfillmentSnapshot: $snapshot,
+            receivingType: $context['receiving_type'],
+            validatedTotal: $validatedTotal,
             customerName: $customerName,
             customerPhone: $customerPhone,
             cartSignature: $this->cartSignature($cart),
@@ -87,14 +105,13 @@ class CreateOrderHandler
         }
 
         $this->submitToDots($localResult['order'], $payload);
+        $orderWithPayment = $this->payments->handle($localResult['order'])['order'];
 
-        return $this->result($localResult['order'], true);
+        return $this->result($orderWithPayment, true);
     }
 
-    private function findExistingOrder(
-        string $idempotencyKey,
-        string $sessionId,
-    ): ?Order {
+    private function findExistingOrder(string $idempotencyKey, string $sessionId): ?Order
+    {
         $order = $this->orders->findByIdempotencyKey($idempotencyKey);
 
         if ($order === null) {
@@ -112,8 +129,9 @@ class CreateOrderHandler
     }
 
     /**
-     * @param  array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}  $session
+     * @param  array<string, mixed>  $session
      * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $fulfillmentSnapshot
      * @return array{order: Order, created: bool}
      */
     private function createLocalOrder(
@@ -121,31 +139,21 @@ class CreateOrderHandler
         array $session,
         string $idempotencyKey,
         array $payload,
+        array $fulfillmentSnapshot,
+        ReceivingType $receivingType,
         string $validatedTotal,
         string $customerName,
         string $customerPhone,
         string $cartSignature,
     ): array {
         try {
-            return DB::transaction(function () use (
-                $restaurant,
-                $session,
-                $idempotencyKey,
-                $payload,
-                $validatedTotal,
-                $customerName,
-                $customerPhone,
-                $cartSignature,
-            ): array {
+            return DB::transaction(function () use ($restaurant, $session, $idempotencyKey, $payload, $fulfillmentSnapshot, $receivingType, $validatedTotal, $customerName, $customerPhone, $cartSignature): array {
                 $existingByKey = $this->orders->findByIdempotencyKeyForUpdate($idempotencyKey);
 
                 if ($existingByKey !== null) {
                     $this->assertSameSession($existingByKey, $session['id']);
 
-                    return [
-                        'order' => $existingByKey,
-                        'created' => false,
-                    ];
+                    return ['order' => $existingByKey, 'created' => false];
                 }
 
                 $cart = $this->carts->findForSessionForUpdate($restaurant, $session['id']);
@@ -154,33 +162,21 @@ class CreateOrderHandler
                     throw new NotFoundHttpException('Active cart was not found.');
                 }
 
-                $cart->load([
-                    'items' => fn ($query) => $query
-                        ->orderBy('id')
-                        ->with('product'),
-                ]);
-
+                $cart->load(['items' => fn ($query) => $query->orderBy('id')->with('product')]);
                 $this->assertCartCanCheckout($cart);
 
                 if ($this->cartSignature($cart) !== $cartSignature) {
-                    throw new ConflictHttpException(
-                        'Cart changed during checkout. Please confirm the cart again.',
-                    );
+                    throw new ConflictHttpException('Cart changed during checkout. Please confirm the cart again.');
                 }
 
                 $existingForCart = $this->orders->findForCartForUpdate($cart->id);
 
                 if ($existingForCart !== null) {
                     if ($existingForCart->idempotency_key !== $idempotencyKey) {
-                        throw new ConflictHttpException(
-                            'An order has already been created for this cart.',
-                        );
+                        throw new ConflictHttpException('An order has already been created for this cart.');
                     }
 
-                    return [
-                        'order' => $existingForCart,
-                        'created' => false,
-                    ];
+                    return ['order' => $existingForCart, 'created' => false];
                 }
 
                 $order = $this->orders->create(
@@ -190,30 +186,21 @@ class CreateOrderHandler
                     idempotencyKey: $idempotencyKey,
                     channel: SessionChannel::from($session['channel']),
                     status: OrderStatus::Creating,
-                    receivingType: ReceivingType::Pickup,
+                    receivingType: $receivingType,
+                    paymentType: self::ONLINE_PAYMENT_TYPE,
                     customerName: $customerName,
                     customerPhone: $customerPhone,
                     total: $validatedTotal,
                     currency: $cart->currency,
+                    fulfillmentSnapshot: $fulfillmentSnapshot,
                     requestPayload: $payload,
                 );
 
                 foreach ($cart->items as $item) {
-                    $this->orders->createItem(
-                        order: $order,
-                        productId: $item->product_id,
-                        externalProductId: $item->external_product_id,
-                        name: $item->product?->name ?? 'Unknown product',
-                        quantity: $item->quantity,
-                        unitPrice: (string) $item->unit_price,
-                        total: (string) $item->total,
-                    );
+                    $this->orders->createItem($order, $item->product_id, $item->external_product_id, $item->product?->name ?? 'Unknown product', $item->quantity, (string) $item->unit_price, (string) $item->total);
                 }
 
-                return [
-                    'order' => $order,
-                    'created' => true,
-                ];
+                return ['order' => $order, 'created' => true];
             });
         } catch (QueryException $exception) {
             $existing = $this->orders->findByIdempotencyKey($idempotencyKey);
@@ -224,10 +211,7 @@ class CreateOrderHandler
 
             $this->assertSameSession($existing, $session['id']);
 
-            return [
-                'order' => $existing,
-                'created' => false,
-            ];
+            return ['order' => $existing, 'created' => false];
         }
     }
 
@@ -239,144 +223,184 @@ class CreateOrderHandler
             $externalOrderId = $response['id'] ?? null;
 
             if (! is_string($externalOrderId) || trim($externalOrderId) === '') {
-                throw new RuntimeException(
-                    'Dots order response does not contain an order id.',
-                );
+                throw new RuntimeException('Dots order response does not contain an order id.');
             }
 
-            DB::transaction(function () use (
-                $order,
-                $externalOrderId,
-                $response,
-            ): void {
-                $this->orders->markAcceptedByDots(
-                    $order,
-                    $externalOrderId,
-                    $response,
-                );
-
-                $this->carts->markCheckedOut(
-                    $order->cart()->firstOrFail(),
-                );
+            DB::transaction(function () use ($order, $externalOrderId, $response): void {
+                $this->orders->markAcceptedByDots($order, $externalOrderId, $response);
+                $this->carts->markCheckedOut($order->cart()->firstOrFail());
             });
-
-            Log::info('Order creation accepted by Dots.', [
-                'order_id' => $order->id,
-                'external_order_id' => $externalOrderId,
-            ]);
         } catch (RequestException $exception) {
             $body = $exception->response->json();
-
-            $message = is_array($body)
-            && is_string($body['message'] ?? null)
-            && $body['message'] !== ''
-                ? $body['message']
-                : 'Dots rejected order creation.';
+            $message = is_array($body) && is_string($body['message'] ?? null) && $body['message'] !== '' ? $body['message'] : 'Dots rejected order creation.';
 
             if ($exception->response->clientError()) {
-                $this->orders->markFailed(
-                    $order,
-                    $message,
-                    is_array($body) ? $body : null,
-                );
-
-                Log::warning('Dots rejected order creation.', [
-                    'order_id' => $order->id,
-                    'status_code' => $exception->response->status(),
-                    'message' => $message,
-                ]);
-
-                throw new HttpException(
-                    422,
-                    $message,
-                    $exception,
-                );
+                $this->orders->markFailed($order, $message, is_array($body) ? $body : null);
+                throw new HttpException(422, $message, $exception);
             }
 
-            $this->orders->markSubmissionUnknown(
-                $order,
-                'Dots returned a server error while creating order.',
-                is_array($body) ? $body : null,
-            );
-
-            Log::error('Dots order creation server failure.', [
-                'order_id' => $order->id,
-                'status_code' => $exception->response->status(),
-            ]);
-
-            throw new HttpException(
-                502,
-                'Ordering service is temporarily unavailable.',
-                $exception,
-            );
+            $this->orders->markSubmissionUnknown($order, 'Dots returned a server error while creating order.', is_array($body) ? $body : null);
+            throw new HttpException(502, 'Ordering service is temporarily unavailable.', $exception);
         } catch (ConnectionException $exception) {
-            $this->orders->markSubmissionUnknown(
-                $order,
-                'Dots connection outcome is unknown.',
-            );
-
-            Log::error('Dots order creation connection failure.', [
-                'order_id' => $order->id,
-            ]);
-
-            throw new HttpException(
-                503,
-                'Ordering service is temporarily unavailable.',
-                $exception,
-            );
+            $this->orders->markSubmissionUnknown($order, 'Dots connection outcome is unknown.');
+            throw new HttpException(503, 'Ordering service is temporarily unavailable.', $exception);
         } catch (RuntimeException $exception) {
-            $this->orders->markSubmissionUnknown(
-                $order,
-                $exception->getMessage(),
-            );
+            $this->orders->markSubmissionUnknown($order, $exception->getMessage());
+            throw new HttpException(502, 'Ordering service returned an invalid response.', $exception);
+        }
+    }
 
-            Log::error('Invalid Dots order response.', [
-                'order_id' => $order->id,
-                'message' => $exception->getMessage(),
-            ]);
+    /** @param array<string, mixed> $session */
+    private function resolveCity(array $session): City
+    {
+        $city = $this->cities->findActiveById(SessionSelection::cityId($session));
 
-            throw new HttpException(
-                502,
-                'Ordering service returned an invalid response.',
-                $exception,
-            );
+        if ($city === null) {
+            throw new NotFoundHttpException('City not found.');
+        }
+
+        return $city;
+    }
+
+    private function resolveRestaurant(array $session, City $city): Restaurant
+    {
+        $restaurant = $this->restaurants->findActiveForCityById($city, SessionSelection::restaurantId($session));
+
+        if ($restaurant === null) {
+            throw new NotFoundHttpException('Restaurant not found.');
+        }
+
+        return $restaurant;
+    }
+
+    private function assertOnlinePaymentSupported(Restaurant $restaurant): void
+    {
+        $paymentTypes = array_map('intval', $restaurant->available_payment_types ?? []);
+
+        if ($paymentTypes !== [] && ! in_array(self::ONLINE_PAYMENT_TYPE, $paymentTypes, true)) {
+            throw new ConflictHttpException('Online payment is not available for this restaurant.');
         }
     }
 
     /**
-     * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>  $session
      * @return array<string, mixed>
      */
+    private function checkoutContext(string $plainToken, array $session, City $city, Restaurant $restaurant): array
+    {
+        $fulfillment = $session['fulfillment'];
+
+        if (($fulfillment['type'] ?? null) === FulfillmentType::Pickup->value) {
+            $address = $this->addresses->findActiveForRestaurantById($restaurant, (int) $fulfillment['restaurant_address_id']);
+
+            if ($address === null) {
+                throw new ConflictHttpException('Pickup location is no longer available.');
+            }
+
+            return [
+                'type' => FulfillmentType::Pickup->value,
+                'receiving_type' => ReceivingType::Pickup,
+                'city' => $city,
+                'restaurant' => $restaurant,
+                'restaurant_address' => $address,
+                'delivery_type' => 2,
+                'delivery_price' => null,
+                'delivery_address' => null,
+            ];
+        }
+
+        $deliveryAddress = $fulfillment['delivery_address'] ?? null;
+
+        if (($fulfillment['type'] ?? null) !== FulfillmentType::Delivery->value || ! is_array($deliveryAddress)) {
+            throw new ConflictHttpException('Validated delivery address is required.');
+        }
+
+        $freshDeliveryType = $this->freshDeliveryType($restaurant, $deliveryAddress);
+
+        if ($freshDeliveryType === null) {
+            $this->sessions->updateFulfillment($plainToken, array_merge($fulfillment, [
+                'dots_delivery_type' => null,
+                'delivery_price' => null,
+                'delivery_address' => null,
+            ]));
+
+            throw new ConflictHttpException('delivery_unavailable');
+        }
+
+        $freshFulfillment = array_merge($fulfillment, [
+            'dots_delivery_type' => (int) $freshDeliveryType['type'],
+            'delivery_price' => $freshDeliveryType['price'],
+        ]);
+
+        $this->sessions->updateFulfillment($plainToken, $freshFulfillment);
+
+        return [
+            'type' => FulfillmentType::Delivery->value,
+            'receiving_type' => ReceivingType::Delivery,
+            'city' => $city,
+            'restaurant' => $restaurant,
+            'restaurant_address' => null,
+            'delivery_type' => (int) $freshDeliveryType['type'],
+            'delivery_price' => $freshDeliveryType['price'],
+            'delivery_address' => $deliveryAddress,
+        ];
+    }
+
+    /** @param array<string, mixed> $deliveryAddress */
+    private function freshDeliveryType(Restaurant $restaurant, array $deliveryAddress): ?array
+    {
+        $response = $this->fulfillmentApi->getCompanyDeliveryTypes($restaurant->external_company_id, (string) $deliveryAddress['latitude'], (string) $deliveryAddress['longitude']);
+        $items = array_is_list($response) ? $response : ($response['items'] ?? $response['deliveryTypes'] ?? []);
+
+        return is_array($items) ? FulfillmentSelection::acceptableDeliveryType($items) : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function buildPayload(array $context, Cart $cart, string $customerName, string $customerPhone, int $deliveryTime): array
+    {
+        /** @var City $city */
+        $city = $context['city'];
+        /** @var Restaurant $restaurant */
+        $restaurant = $context['restaurant'];
+
+        $fields = [
+            'cityId' => $city->external_city_id,
+            'companyId' => $restaurant->external_company_id,
+            'userName' => $customerName,
+            'userPhone' => $customerPhone,
+            'deliveryType' => $context['delivery_type'],
+            'paymentType' => self::ONLINE_PAYMENT_TYPE,
+            'deliveryTime' => $deliveryTime,
+            'cartItems' => $cart->items->map(static fn ($item): array => ['id' => $item->external_product_id, 'count' => $item->quantity])->values()->all(),
+        ];
+
+        if ($context['type'] === FulfillmentType::Pickup->value) {
+            /** @var RestaurantAddress $address */
+            $address = $context['restaurant_address'];
+            $fields['companyAddressId'] = $address->external_address_id;
+        } else {
+            $deliveryAddress = $context['delivery_address'];
+            $fields['deliveryAddressStreet'] = $deliveryAddress['street'];
+            $fields['deliveryAddressHouse'] = $deliveryAddress['house'];
+        }
+
+        return ['orderFields' => $fields];
+    }
+
+    /** @return array<string, mixed> */
     private function validatePrices(array $payload): array
     {
         try {
             return $this->cartPrices->validate($payload);
         } catch (RequestException $exception) {
             $body = $exception->response->json();
-            $message = is_array($body)
-            && is_string($body['message'] ?? null)
-            && $body['message'] !== ''
-                ? $body['message']
-                : 'Dots rejected checkout data.';
-
-            Log::warning('Dots checkout validation failed.', [
-                'status_code' => $exception->response->status(),
-                'message' => $message,
-            ]);
-
-            throw new HttpException(
-                $exception->response->clientError() ? 422 : 502,
-                $exception->response->clientError()
-                    ? $message
-                    : 'Ordering service is temporarily unavailable.',
-                $exception,
-            );
+            $message = is_array($body) && is_string($body['message'] ?? null) && $body['message'] !== '' ? $body['message'] : 'Dots rejected checkout data.';
+            throw new HttpException($exception->response->clientError() ? 422 : 502, $exception->response->clientError() ? $message : 'Ordering service is temporarily unavailable.', $exception);
         } catch (ConnectionException $exception) {
-            throw new HttpException(
-                503,
-                'Ordering service is temporarily unavailable.',
-                $exception,
-            );
+            throw new HttpException(503, 'Ordering service is temporarily unavailable.', $exception);
         }
     }
 
@@ -387,112 +411,30 @@ class CreateOrderHandler
         }
 
         if ($cart->expires_at->isPast()) {
-            throw ValidationException::withMessages([
-                'cart' => ['Cart has expired.'],
-            ]);
+            throw ValidationException::withMessages(['cart' => ['Cart has expired.']]);
         }
 
         if ($cart->items->isEmpty()) {
-            throw ValidationException::withMessages([
-                'cart' => ['Cart is empty.'],
-            ]);
+            throw ValidationException::withMessages(['cart' => ['Cart is empty.']]);
         }
 
         foreach ($cart->items as $item) {
             if ($item->product === null || ! $item->product->is_available) {
-                throw ValidationException::withMessages([
-                    'cart' => ["Product {$item->external_product_id} is unavailable."],
-                ]);
+                throw ValidationException::withMessages(['cart' => ["Product {$item->external_product_id} is unavailable."]]);
             }
         }
     }
 
-    /**
-     * @param  array<string, mixed>  $session
-     * @return array{0: string, 1: string}
-     */
+    /** @param array<string, mixed> $session */
     private function contact(array $session): array
     {
-        $contact = $session['metadata']['contact'] ?? null;
+        $contact = SessionSelection::contact($session);
 
-        if (! is_array($contact)) {
-            throw ValidationException::withMessages([
-                'contact' => ['Customer contact is required before checkout.'],
-            ]);
+        if ($contact === null || ($contact['phone_verified'] ?? null) !== true) {
+            throw ValidationException::withMessages(['contact' => ['Verified customer contact is required before checkout.']]);
         }
 
-        $name = trim((string) ($contact['name'] ?? ''));
-        $rawPhone = trim((string) ($contact['phone'] ?? ''));
-        $phone = preg_replace('/\D+/', '', $rawPhone) ?? '';
-
-        if (preg_match('/^0\d{9}$/', $phone) === 1) {
-            $phone = '38'.$phone;
-        }
-
-        if ($name === '' || mb_strlen($name) > 100) {
-            throw ValidationException::withMessages([
-                'contact.name' => [
-                    'Customer name is required and must not exceed 100 characters.',
-                ],
-            ]);
-        }
-
-        if (preg_match('/^380\d{9}$/', $phone) !== 1) {
-            throw ValidationException::withMessages([
-                'contact.phone' => ['Phone must be a valid Ukrainian number.'],
-            ]);
-        }
-
-        return [$name, $phone];
-    }
-
-    /** @return array<string, mixed> */
-    private function buildPayload(
-        Restaurant $restaurant,
-        Cart $cart,
-        string $customerName,
-        string $customerPhone,
-        int $deliveryTime,
-    ): array {
-        $cityId = config('dots.city_id');
-        $companyAddressId = config('dots.company_address_id');
-        $companyId = $restaurant->external_company_id;
-
-        if (! is_string($cityId) || $cityId === '') {
-            throw new RuntimeException('DOTS_CITY_ID is not configured.');
-        }
-
-        if (! is_string($companyAddressId) || $companyAddressId === '') {
-            throw new RuntimeException(
-                'DOTS_COMPANY_ADDRESS_ID is not configured.',
-            );
-        }
-
-        if (! is_string($companyId) || $companyId === '') {
-            throw new RuntimeException(
-                'Restaurant does not have a Dots company id.',
-            );
-        }
-
-        return [
-            'orderFields' => [
-                'cityId' => $cityId,
-                'companyId' => $companyId,
-                'companyAddressId' => $companyAddressId,
-                'userName' => $customerName,
-                'userPhone' => $customerPhone,
-                'deliveryType' => 2,
-                'paymentType' => 1,
-                'deliveryTime' => $deliveryTime,
-                'cartItems' => $cart->items
-                    ->map(static fn ($item): array => [
-                        'id' => $item->external_product_id,
-                        'count' => $item->quantity,
-                    ])
-                    ->values()
-                    ->all(),
-            ],
-        ];
+        return [trim($contact['name']), ltrim(trim($contact['phone']), '+')];
     }
 
     /** @param array<string, mixed> $priceValidation */
@@ -501,9 +443,7 @@ class CreateOrderHandler
         $total = $priceValidation['totalPrice'] ?? null;
 
         if (! is_int($total) && ! is_float($total) && ! is_string($total)) {
-            throw new RuntimeException(
-                'Dots price validation response does not contain totalPrice.',
-            );
+            throw new RuntimeException('Dots price validation response does not contain totalPrice.');
         }
 
         $total = trim((string) $total);
@@ -515,39 +455,56 @@ class CreateOrderHandler
         return $total;
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     * @param  array<string, mixed>  $priceValidation
+     * @return array<string, mixed>
+     */
+    private function fulfillmentSnapshot(array $context, array $priceValidation): array
+    {
+        /** @var City $city */
+        $city = $context['city'];
+        /** @var Restaurant $restaurant */
+        $restaurant = $context['restaurant'];
+
+        return [
+            'city_id' => $city->id,
+            'external_city_id' => $city->external_city_id,
+            'restaurant_id' => $restaurant->id,
+            'external_company_id' => $restaurant->external_company_id,
+            'type' => $context['type'],
+            'dots_delivery_type' => $context['delivery_type'],
+            'delivery_price' => $context['delivery_price'],
+            'price_validation_delivery_price' => $priceValidation['deliveryPrice'] ?? null,
+            'payment_type' => self::ONLINE_PAYMENT_TYPE,
+            'restaurant_address_id' => $context['restaurant_address']?->id,
+            'external_address_id' => $context['restaurant_address']?->external_address_id,
+            'delivery_address' => $context['delivery_address'],
+        ];
+    }
+
     private function cartSignature(Cart $cart): string
     {
-        $data = $cart->items
-            ->map(static fn ($item): array => [
-                'id' => $item->id,
-                'product_id' => $item->product_id,
-                'external_product_id' => $item->external_product_id,
-                'quantity' => $item->quantity,
-                'unit_price' => (string) $item->unit_price,
-                'total' => (string) $item->total,
-                'available' => (bool) ($item->product?->is_available ?? false),
-            ])
-            ->values()
-            ->all();
-
-        return hash('sha256', json_encode($data, JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode($cart->items->map(static fn ($item): array => [
+            'id' => $item->id,
+            'product_id' => $item->product_id,
+            'external_product_id' => $item->external_product_id,
+            'quantity' => $item->quantity,
+            'unit_price' => (string) $item->unit_price,
+            'total' => (string) $item->total,
+            'available' => (bool) ($item->product?->is_available ?? false),
+        ])->values()->all(), JSON_THROW_ON_ERROR));
     }
 
     private function assertSameSession(Order $order, string $sessionId): void
     {
         if ($order->session_id !== $sessionId) {
-            throw new ConflictHttpException(
-                'Idempotency key is already in use.',
-            );
+            throw new ConflictHttpException('Idempotency key is already in use.');
         }
     }
 
-    /** @return array{order: Order, created: bool} */
     private function result(Order $order, bool $created): array
     {
-        return [
-            'order' => $this->orders->refreshWithItems($order),
-            'created' => $created,
-        ];
+        return ['order' => $this->orders->refreshWithItems($order), 'created' => $created];
     }
 }

@@ -2,15 +2,13 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\SyncRestaurantCatalog;
-use App\Models\Restaurant;
+use App\Jobs\SyncDotsTopology;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 
-#[Signature('catalog:sync
-    {restaurant : Stable local restaurant slug}')]
-#[Description('Queue catalog synchronization for a local restaurant.')]
+#[Signature('catalog:sync')]
+#[Description('Queue Dots topology and catalog synchronization.')]
 class SyncRestaurantCatalogCommand extends Command
 {
     /**
@@ -18,27 +16,9 @@ class SyncRestaurantCatalogCommand extends Command
      */
     public function handle(): int
     {
-        $slug = (string) $this->argument('restaurant');
+        SyncDotsTopology::dispatch();
 
-        $restaurant = Restaurant::query()
-            ->where('slug', $slug)
-            ->first();
-
-        if ($restaurant === null) {
-            $this->error("Restaurant not found: slug={$slug}");
-
-            return Command::FAILURE;
-        }
-
-        if (! $restaurant->is_active) {
-            $this->error("Restaurant is inactive: id={$restaurant->id} slug={$restaurant->slug}");
-
-            return Command::FAILURE;
-        }
-
-        SyncRestaurantCatalog::dispatch($restaurant->id);
-
-        $this->line("Catalog synchronization queued: id={$restaurant->id} slug={$restaurant->slug}");
+        $this->line('Catalog topology synchronization queued.');
 
         return Command::SUCCESS;
     }

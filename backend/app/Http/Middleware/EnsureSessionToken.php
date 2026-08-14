@@ -54,8 +54,13 @@ class EnsureSessionToken
             return false;
         }
 
-        if (! isset($session['restaurant_id']) || ! is_int($session['restaurant_id']) || $session['restaurant_id'] < 1) {
-            return false;
+        foreach (['city_id', 'restaurant_id'] as $selectionKey) {
+            if (array_key_exists($selectionKey, $session)
+                && $session[$selectionKey] !== null
+                && (! is_int($session[$selectionKey]) || $session[$selectionKey] < 1)
+            ) {
+                return false;
+            }
         }
 
         if (! isset($session['channel']) || ! is_string($session['channel']) || ! SessionChannel::tryFrom($session['channel'])) {

@@ -136,6 +136,27 @@ class CartRepository
         return $cart;
     }
 
+    public function abandonActiveForSession(int $restaurantId, string $sessionId): int
+    {
+        return Cart::query()
+            ->where('restaurant_id', $restaurantId)
+            ->where('session_id', $sessionId)
+            ->where('status', CartStatus::Active)
+            ->update([
+                'status' => CartStatus::Abandoned,
+                'updated_at' => now(),
+            ]);
+    }
+
+    public function hasNonActiveCartForSession(Restaurant $restaurant, string $sessionId): bool
+    {
+        return Cart::query()
+            ->where('restaurant_id', $restaurant->id)
+            ->where('session_id', $sessionId)
+            ->where('status', '!=', CartStatus::Active)
+            ->exists();
+    }
+
     public function refreshWithItems(Cart $cart): Cart
     {
         return Cart::query()

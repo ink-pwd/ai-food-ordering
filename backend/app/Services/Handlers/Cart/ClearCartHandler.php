@@ -6,6 +6,7 @@ use App\Enums\CartStatus;
 use App\Models\Cart;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -23,7 +24,7 @@ class ClearCartHandler
     public function handle(array $session): Cart
     {
         $restaurant = $this->restaurants->findActiveById(
-            $session['restaurant_id'],
+            SessionSelection::restaurantId($session),
         );
 
         if ($restaurant === null) {

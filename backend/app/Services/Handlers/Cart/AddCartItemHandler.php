@@ -7,6 +7,7 @@ use App\Models\Cart;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\ProductRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -24,7 +25,7 @@ class AddCartItemHandler
      */
     public function handle(array $session, int $productId, int $quantity): Cart
     {
-        $restaurant = $this->restaurants->findActiveById($session['restaurant_id']);
+        $restaurant = $this->restaurants->findActiveById(SessionSelection::restaurantId($session));
 
         if ($restaurant === null) {
             throw new NotFoundHttpException;

@@ -38,6 +38,12 @@ class OrderFactory extends Factory
             'channel' => SessionChannel::ChatGPT->value,
             'status' => OrderStatus::Draft->value,
             'receiving_type' => ReceivingType::Pickup->value,
+            'payment_type' => 2,
+            'payment_checkout_url' => null,
+            'payment_snapshot' => null,
+            'payment_received_at' => null,
+            'payment_qr_path' => null,
+            'payment_qr_fingerprint' => null,
 
             'customer_name' => fake()->name(),
             'customer_phone' => '+380'.fake()->numerify('#########'),
@@ -55,6 +61,7 @@ class OrderFactory extends Factory
             },
 
             'request_payload' => null,
+            'fulfillment_snapshot' => null,
             'response_payload' => null,
             'failure_message' => null,
         ];

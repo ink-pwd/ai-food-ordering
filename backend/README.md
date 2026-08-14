@@ -1,505 +1,181 @@
 # AI Food Ordering Backend
 
-Laravel backend service for the AI Food Ordering project.
+Laravel backend service for the AI Food Ordering project. It owns the business state for sessions, city/restaurant selection, fulfillment, catalog data, carts, Dots order creation, online payment links, and backend-generated payment QR codes.
 
-The backend integrates with the Dots API, synchronizes and stores restaurant catalog data, manages sessions, carts and orders, and exposes an internal REST API for the Telegram bot and MCP server.
+Telegram and MCP clients are thin clients. They call this internal REST API; they do not talk to Dots directly and they do not provide trusted Dots identifiers, prices, payment URLs, or QR paths.
 
-Business logic remains inside this service. External clients do not communicate with Dots directly.
-
-## Stack
-
-* PHP 8.5
-* Laravel 13
-* PostgreSQL 17
-* Redis 8
-* RabbitMQ 4
-* Docker Compose
-* Pest / PHPUnit
-
-## Requirements
-
-* Docker
-* Docker Compose
-* Git
-
-PHP, Composer, PostgreSQL, Redis and RabbitMQ do not need to be installed locally.
-
----
-
-# Setup
-
-All commands below are executed from the project root unless stated otherwise.
-
-## 1. Clone the repository
-
-```bash
-git clone <repository-url>
-cd ai-food-ordering
-```
-
-The backend application is located in:
+## Architecture
 
 ```text
-backend/
+Telegram / MCP clients
+  -> Backend internal REST API (Laravel)
+  -> Dots Clients API
 ```
 
-The Docker Compose configuration is located in the project root:
+Infrastructure:
+
+- PHP 8.5
+- Laravel 13
+- PostgreSQL
+- Redis
+- RabbitMQ
+- Dots Clients API
+- Pest / PHPUnit
+- Docker Compose
+
+The backend persists synchronized Dots topology/catalog data, stores Redis-backed session state, creates local carts/orders in PostgreSQL, validates checkout prices with Dots, creates Dots online-payment orders with `paymentType = 2`, polls/retries online payment data, stores the trusted checkout URL, and generates private PNG QR codes for that checkout URL.
+
+## Core flow
+
+1. Create session.
+2. Save contact.
+3. Request OTP.
+4. Verify OTP.
+5. Select city.
+6. List and select restaurant.
+7. Select pickup or delivery fulfillment.
+8. Browse catalog.
+9. Create/update cart.
+10. Checkout.
+11. Create local and Dots order.
+12. Resolve online payment checkout URL.
+13. Retrieve backend-generated payment QR PNG.
+
+## Main domain entities
+
+- `City` — synchronized Dots city/topology node exposed to clients for selection.
+- `Restaurant` — local restaurant/company synchronized from Dots and scoped to a city.
+- `RestaurantAddress` — active pickup address for a restaurant.
+- `Category` — synchronized restaurant catalog category.
+- `Product` — synchronized restaurant product.
+- `Session` — Redis state for the current internal client journey.
+- `Cart` — PostgreSQL cart bound to the selected restaurant/session.
+- `CartItem` — product and quantity inside a cart.
+- `Order` — historical checkout record with fulfillment snapshot, Dots order id, payment URL, and QR metadata.
+
+## Synchronization
+
+Global Dots topology/catalog synchronization is queued with the current Artisan command:
+
+```bash
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app \
+php artisan catalog:sync
+```
+
+The command dispatches `SyncDotsTopology`, which synchronizes cities, restaurants, restaurant addresses, and restaurant catalogs into PostgreSQL.
+
+## Queues
+
+RabbitMQ is the queue backend. Run workers from `backend/` with:
+
+```bash
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app \
+php artisan queue:work rabbitmq
+```
+
+Use deployment-specific process supervision in production.
+
+## Sessions
+
+Session state is stored outside PostgreSQL using the configured internal session store (`redis` in normal environments, `array` in tests). Session-bound endpoints require `X-Session-Token`. Exiting a session closes Redis session state and abandons unfinished active carts, but historical orders and QR metadata remain in PostgreSQL.
+
+## OTP
+
+The local/testing OTP driver logs/generated codes through the configured sender. OTP challenges store a hash, TTL, resend cooldown, and remaining attempts. A real production SMS provider is intentionally not implemented in this backend stage and must be integrated before production SMS delivery.
+
+## Fulfillment
+
+Pickup and delivery are selected after city and restaurant selection. Pickup requires choosing an active `RestaurantAddress`. Delivery validates the user-provided address through Dots using backend-trusted city and restaurant data, stores trusted coordinates, checks city polygon and restaurant delivery zone availability, and records the Dots delivery type/price.
+
+## Orders
+
+Checkout uses the selected city/restaurant/fulfillment and current cart. Dots is authoritative for price validation. Order creation is idempotent through the `Idempotency-Key` header. The backend never accepts client-provided Dots IDs, prices, payment type, fulfillment snapshots, or order item totals.
+
+## Payments
+
+Orders use Dots online payment (`paymentType = 2`). Dots creates the payment as part of order creation. The backend polls/retries online-payment-data retrieval with bounded waiting, represents payment as `pending` or `ready`, and persists the trusted `checkoutUrl` when ready. Idempotent order replay does not create another Dots order and may resolve missing payment data.
+
+## QR
+
+The backend generates a PNG QR code from the persisted trusted checkout URL only. QR PNG files are stored privately on the Laravel `local` disk under:
 
 ```text
-docker-compose.yml
+payment-qr/{order-id}.png
 ```
 
-## 2. Create the environment file
+QR metadata (`payment_qr_path`, `payment_qr_fingerprint`) is stored on `orders`. The authenticated endpoint returns image bytes directly; no public storage link or base64 JSON is used.
 
-```bash
-cp backend/.env.example backend/.env
-```
+## Security
 
-Configure the required values in:
-
-```text
-backend/.env
-```
-
-Important Dots configuration:
-
-```env
-DOTS_API_VERSION=2.1.0
-DOTS_API_BASE_URL=
-DOTS_API_ACCOUNT_TOKEN=
-DOTS_API_TOKEN=
-DOTS_API_AUTH_TOKEN=
-DOTS_CATALOG_CACHE_TTL_SECONDS=300
-
-DOTS_CITY_ID=
-DOTS_COMPANY_ID=
-DOTS_COMPANY_ADDRESS_ID=
-```
-
-Internal API configuration:
-
-```env
-INTERNAL_API_TOKEN=
-INTERNAL_SESSION_STORE=redis
-INTERNAL_SESSION_TTL_SECONDS=
-INTERNAL_SESSION_KEY_PREFIX=internal-session
-INTERNAL_RESTAURANT_SLUG=
-```
-
-Database configuration:
-
-```env
-DB_CONNECTION=pgsql
-DB_HOST=db
-DB_PORT=5432
-DB_DATABASE=food_ordering
-DB_USERNAME=food_ordering
-DB_PASSWORD=root
-```
-
-Redis:
-
-```env
-REDIS_HOST=redis
-REDIS_PORT=6379
-```
-
-RabbitMQ:
-
-```env
-RABBITMQ_HOST=rabbitmq
-RABBITMQ_PORT=5672
-RABBITMQ_USER=food_ordering
-RABBITMQ_PASSWORD=root
-```
-
-Do not commit the real `.env` file or API tokens to Git.
-
-## 3. Start Docker services
-
-```bash
-docker compose up -d
-```
-
-Check the containers:
-
-```bash
-docker compose ps
-```
-
-## 4. Install PHP dependencies
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-composer install
-```
-
-## 5. Generate the Laravel application key
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan key:generate
-```
-
-## 6. Run database migrations
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan migrate
-```
-
-## 7. Create the local restaurant
-
-Catalog synchronization requires a local Restaurant record.
-
-`DOTS_COMPANY_ID` and `INTERNAL_RESTAURANT_SLUG` are read from `backend/.env`:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan restaurant:create \
-"$(grep '^DOTS_COMPANY_ID=' backend/.env | cut -d= -f2- | tr -d "\"'")" \
-"Papa Jon" \
-"$(grep '^INTERNAL_RESTAURANT_SLUG=' backend/.env | cut -d= -f2- | tr -d "\"'")"
-```
-
-If the database is recreated with `migrate:fresh`, this command must be executed again before catalog synchronization.
-
-## 8. Synchronize the catalog
-
-Dispatch the initial catalog synchronization job:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan catalog:sync \
-"$(grep '^INTERNAL_RESTAURANT_SLUG=' backend/.env | cut -d= -f2- | tr -d "\"'")"
-```
-
-Process the job:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan queue:work rabbitmq --queue=catalog-sync --once -v
-```
-
-The synchronization process:
-
-1. Resolves the local Restaurant.
-2. Fetches the catalog from Dots.
-3. Reconciles categories and products.
-4. Stores catalog data in PostgreSQL.
-5. Uses Redis for external API caching.
-
----
-
-# Running the Application
-
-The backend is available at:
-
-```text
-http://localhost:8080
-```
-
-Laravel health endpoint:
-
-```text
-http://localhost:8080/up
-```
-
-## Catalog queue worker
-
-During normal operation, keep the catalog worker running:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan queue:work rabbitmq --queue=catalog-sync
-```
-
-To trigger catalog synchronization manually:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan catalog:sync \
-"$(grep '^INTERNAL_RESTAURANT_SLUG=' backend/.env | cut -d= -f2- | tr -d "\"'")"
-```
-
-Production scheduling is deployment-specific and may use Laravel Scheduler or an external scheduler.
-
----
-
-# Internal API
-
-The REST API is intended for internal clients such as:
-
-* Telegram bot
-* MCP server
-
-Requests are protected with:
+All API endpoints require:
 
 ```text
 X-Internal-Api-Token
 ```
 
-Session-bound requests additionally require:
+Session-bound endpoints also require:
 
 ```text
 X-Session-Token
 ```
 
-Order creation additionally requires:
+Order creation also requires:
 
 ```text
 Idempotency-Key
 ```
 
-The backend owns and validates:
+The backend derives trusted Dots city, restaurant, address, price, payment, and QR data from persisted state. It rejects arbitrary checkout URLs, QR paths, Dots IDs, session IDs, and totals from clients.
 
-* restaurant selection;
-* sessions;
-* catalog data;
-* cart state;
-* product prices;
-* cart totals;
-* order totals;
-* Dots identifiers;
-* order lifecycle.
+## Installation
 
-External clients act only as thin interfaces over the internal REST API.
-
-A session may retain multiple historical carts, while only one cart can be active for the selected restaurant at a time.
-
----
-
-# Order Flow
-
-```text
-Client
-  ↓
-Internal REST API
-  ↓
-Session
-  ↓
-Cart
-  ↓
-Dots price validation
-  ↓
-Local order creation
-  ↓
-Dots order creation
-  ↓
-Local order lifecycle update
-```
-
-Dots is the authoritative source for the final order price.
-
-The locally stored catalog price is not assumed to be the final checkout price because promotions or other Dots-side pricing rules may change the total.
-
-The backend validates the cart through Dots immediately before order creation.
-
-## Idempotency
-
-Order creation requires an `Idempotency-Key` header.
-
-Repeating the same order request with the same idempotency key returns the existing local order instead of creating another Dots order.
-
-This protects against duplicate orders caused by retries or network failures.
-
----
-
-# Testing
-
-Automated tests use a separate PostgreSQL database in the `db_test` Docker service.
-
-The test database is enabled through the Docker Compose `test` profile and uses an in-memory `tmpfs` volume.
-
-## Start the test environment
-
-```bash
-docker compose --profile test up -d
-```
-
-## Run all tests
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan test --compact
-```
-
-Current test suite:
-
-```text
-375 tests
-1243 assertions
-```
-
-The tests cover:
-
-* catalog synchronization;
-* catalog reconciliation;
-* categories and products;
-* product search;
-* sessions;
-* contact data;
-* carts and cart items;
-* price validation;
-* order creation;
-* order idempotency;
-* order lifecycle;
-* Dots API failures;
-* Redis integration;
-* RabbitMQ integration;
-* internal REST API behavior.
-
-## Run a specific test
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan test tests/Feature/OrderApiTest.php
-```
-
-## Run the E2E test
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan test tests/E2E/DotsOrderE2ETest.php
-```
-
-Automated E2E tests mock external Dots HTTP requests and therefore do not create real Dots orders.
-
-The Laravel application, database operations, repositories, handlers, session logic, cart logic and order lifecycle remain real.
-
-Real Dots API verification should be performed separately as a manual integration or smoke test.
-
-## Recreate the test database
-
-Normally this is handled by the test suite.
-
-If necessary:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan migrate:fresh --env=testing
-```
-
----
-
-# Code Style
-
-Laravel Pint is used for formatting.
-
-Format the project:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-vendor/bin/pint
-```
-
-Before committing changes:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-vendor/bin/pint --test
-```
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan test --compact
-```
-
----
-
-# Docker Services
-
-| Service    | Purpose                   |     Host port |
-| ---------- | ------------------------- | ------------: |
-| `app`      | Laravel + Nginx           |        `8080` |
-| `db`       | PostgreSQL                |        `5433` |
-| `db_test`  | PostgreSQL test database  | internal only |
-| `redis`    | Cache and runtime storage |        `6379` |
-| `rabbitmq` | RabbitMQ                  |        `5672` |
-| `rabbitmq` | Management UI             |       `15672` |
-| `adminer`  | Database administration   |        `8081` |
-
-Adminer:
-
-```text
-http://localhost:8081
-```
-
-RabbitMQ Management UI:
-
-```text
-http://localhost:15672
-```
-
----
-
-# Useful Commands
-
-Start the project:
+From the repository root:
 
 ```bash
 docker compose up -d
 ```
 
-Start with the test database:
+From `backend/`, install dependencies and initialize Laravel:
 
 ```bash
-docker compose --profile test up -d
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app composer install
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php artisan key:generate
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php artisan migrate
 ```
 
-Stop containers:
+Create `backend/.env` from `.env.example` and configure placeholders for PostgreSQL, Redis, RabbitMQ, Dots API tokens, and `INTERNAL_API_TOKEN`. Never commit real secrets.
+
+Synchronize Dots data:
 
 ```bash
-docker compose down
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php artisan catalog:sync
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php artisan queue:work rabbitmq --once -v
 ```
 
-Stop containers and remove persistent volumes:
+## Testing
+
+Run formatting:
 
 ```bash
-docker compose down -v
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app vendor/bin/pint --dirty --format agent
 ```
 
-View backend logs:
+Run backend tests:
 
 ```bash
-docker compose logs -f app
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php artisan test --compact
 ```
 
-View RabbitMQ logs:
+Run E2E only:
 
 ```bash
-docker compose logs -f rabbitmq
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php artisan test --compact tests/E2E/DotsOrderE2ETest.php
 ```
 
-Open a shell inside the backend container:
+E2E tests fake external Dots HTTP calls and do not create real paid orders.
 
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app sh
-```
+## API documentation
 
-Run an Artisan command:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan <command>
-```
-
-Clear Laravel caches:
-
-```bash
-docker compose exec --user "$(id -u):$(id -g)" app \
-php artisan optimize:clear
-```
-
----
-
-# Development Notes
-
-* PostgreSQL is used in both development and automated tests.
-* SQLite is intentionally not used because the application relies on PostgreSQL-specific behavior.
-* Redis is used for caching and internal runtime data.
-* RabbitMQ is used for asynchronous catalog synchronization.
-* External Dots API access is isolated behind the backend integration layer.
-* Automated tests mock Dots HTTP requests where appropriate.
-* Telegram and MCP are separate thin clients that communicate with this backend through its internal REST API.
-* Business logic must not be duplicated in Telegram or MCP services.
+- English technical documentation: [`DocsENG.md`](DocsENG.md)
+- Russian technical documentation: [`DocsRUS.md`](DocsRUS.md)
+- OpenAPI/Swagger: [`openapi.yaml`](openapi.yaml)

@@ -58,7 +58,10 @@ class UpdateSessionContactRequest extends FormRequest
 
                 $phone = $this->input('phone');
 
-                if (! is_string($phone) || ! $this->isValidNormalizedPhone($this->normalizePhone($phone))) {
+                if (! is_string($phone)
+                    || preg_match('/[^+\d\s\-()]/', $phone) === 1
+                    || ! $this->isValidNormalizedPhone($this->normalizePhone($phone))
+                ) {
                     $validator->errors()->add('phone', 'The phone field must be a valid phone number.');
                 }
             },
@@ -69,12 +72,20 @@ class UpdateSessionContactRequest extends FormRequest
     {
         $normalizedPhone = str_replace([' ', '-', '(', ')'], '', $phone);
 
+        if (preg_match('/[^+\d]/', $normalizedPhone) === 1) {
+            return $normalizedPhone;
+        }
+
+        if (substr_count($normalizedPhone, '+') > 1 || (str_contains($normalizedPhone, '+') && ! str_starts_with($normalizedPhone, '+'))) {
+            return $normalizedPhone;
+        }
+
         if (str_starts_with($normalizedPhone, '00')) {
             $normalizedPhone = '+'.substr($normalizedPhone, 2);
-        } elseif (str_starts_with($normalizedPhone, '380')) {
-            $normalizedPhone = '+'.$normalizedPhone;
         } elseif (preg_match('/\A0\d{9}\z/', $normalizedPhone) === 1) {
             $normalizedPhone = '+38'.$normalizedPhone;
+        } elseif (preg_match('/\A380\d{9}\z/', $normalizedPhone) === 1) {
+            $normalizedPhone = '+'.$normalizedPhone;
         }
 
         return $normalizedPhone;
