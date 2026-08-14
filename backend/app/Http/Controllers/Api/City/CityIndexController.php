@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Api\City;
-  
+
 use App\Http\Controllers\Controller;
 use App\Http\Resources\CityResource;
 use App\Services\Repositories\CityRepository;

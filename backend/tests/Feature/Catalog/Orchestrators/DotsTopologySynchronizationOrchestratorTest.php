@@ -13,7 +13,7 @@ it('creates and updates cities restaurants and addresses from complete Dots disc
 
     mockDiscovery([
         'cities' => ['items' => [dotsCity()], 'hasNext' => false],
-        'cityDetails' => [dotsCity(['currency' => 'UAH', 'timezone' => 'Europe/Kyiv'])],
+        'cityDetails' => [dotsCity(['currency' => ['formatted' => '₴', 'token' => 'UAH'], 'timezone' => 'Europe/Kyiv'])],
         'companies' => ['11111111-1111-1111-1111-111111111111' => ['items' => [dotsCompany()], 'hasNext' => false]],
         'companyDetails' => ['22222222-2222-2222-2222-222222222222' => dotsCompany([
             'addresses' => [dotsAddress()],
@@ -128,6 +128,10 @@ function dotsCity(array $overrides = []): array
         'name' => 'Чернигов',
         'url' => 'chernigov',
         'status' => 1,
+        'currency' => [
+            'formatted' => '₴',
+            'token' => 'UAH',
+        ],
         'centerCoordinates' => [
             'latitude' => 51.4982,
             'longitude' => 31.2893499,

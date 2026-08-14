@@ -5,7 +5,6 @@ namespace App\Services\Orchestrators;
 use App\Integrations\Dots\DiscoveryApi;
 use App\Jobs\SyncRestaurantCatalog;
 use App\Models\City;
-use App\Models\Restaurant;
 use App\Services\Repositories\CityRepository;
 use App\Services\Repositories\RestaurantAddressRepository;
 use App\Services\Repositories\RestaurantRepository;
@@ -196,7 +195,9 @@ class DotsTopologySynchronizationOrchestrator
             'name' => ['sometimes', 'string', 'max:255'],
             'url' => ['sometimes', 'string', 'max:255'],
             'status' => ['sometimes', 'integer'],
-            'currency' => ['nullable', 'string', 'size:3'],
+            'currency' => ['required', 'array'],
+            'currency.token' => ['required', 'string', 'size:3'],
+            'currency.formatted' => ['nullable', 'string', 'max:16'],
             'timezone' => ['nullable', 'string', 'max:255'],
             'centerCoordinates' => ['nullable', 'array'],
             'centerCoordinates.latitude' => ['nullable', 'numeric'],
@@ -273,7 +274,7 @@ class DotsTopologySynchronizationOrchestrator
             'is_active' => $this->isActiveDotsEntity($city),
             'center_latitude' => Arr::get($city, 'centerCoordinates.latitude'),
             'center_longitude' => Arr::get($city, 'centerCoordinates.longitude'),
-            'currency' => $city['currency'] ?? null,
+            'currency' => strtoupper($city['currency']['token']),
             'timezone' => $city['timezone'] ?? null,
         ];
     }
@@ -288,7 +289,7 @@ class DotsTopologySynchronizationOrchestrator
         return [
             'name' => $company['name'],
             'slug' => $company['url'],
-            'currency' => strtoupper((string) ($city['currency'] ?? 'UAH')),
+            'currency' => strtoupper((string) Arr::get($city, 'currency.token', 'UAH')),
             'locale' => 'uk-UA',
             'timezone' => (string) ($city['timezone'] ?? 'Europe/Kyiv'),
             'is_active' => $this->isActiveDotsEntity($company),
