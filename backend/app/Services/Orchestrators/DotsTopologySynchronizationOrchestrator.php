@@ -218,7 +218,10 @@ class DotsTopologySynchronizationOrchestrator
             'companies.*.url' => ['required', 'string', 'max:255'],
             'companies.*.status' => ['required', 'integer'],
             'companies.*.image' => ['nullable', 'string'],
-            'companies.*.availablePaymentTypes' => ['nullable', 'array'],
+            'companies.*.availablePaymentTypes' => ['nullable', 'array', 'list'],
+            'companies.*.availablePaymentTypes.*' => ['required', 'array'],
+            'companies.*.availablePaymentTypes.*.type' => ['required', 'integer'],
+            'companies.*.availablePaymentTypes.*.title' => ['nullable', 'string', 'max:255'],
             'companies.*.availableDeliveryTypes' => ['nullable', 'array'],
             'companies.*.schedule' => ['nullable', 'array'],
             'companies.*.deliveryTimeText' => ['nullable', 'string', 'max:255'],
@@ -235,7 +238,10 @@ class DotsTopologySynchronizationOrchestrator
             'url' => ['sometimes', 'string', 'max:255'],
             'status' => ['sometimes', 'integer'],
             'image' => ['nullable', 'string'],
-            'availablePaymentTypes' => ['nullable', 'array'],
+            'availablePaymentTypes' => ['nullable', 'array', 'list'],
+            'availablePaymentTypes.*' => ['required', 'array'],
+            'availablePaymentTypes.*.type' => ['required', 'integer'],
+            'availablePaymentTypes.*.title' => ['nullable', 'string', 'max:255'],
             'availableDeliveryTypes' => ['nullable', 'array'],
             'schedule' => ['nullable', 'array'],
             'deliveryTimeText' => ['nullable', 'string', 'max:255'],
@@ -294,12 +300,21 @@ class DotsTopologySynchronizationOrchestrator
             'timezone' => (string) ($city['timezone'] ?? 'Europe/Kyiv'),
             'is_active' => $this->isActiveDotsEntity($company),
             'image_url' => $company['image'] ?? null,
-            'available_payment_types' => $company['availablePaymentTypes'] ?? [],
+            'available_payment_types' => $this->availablePaymentTypes($company['availablePaymentTypes'] ?? []),
             'available_delivery_types' => $company['availableDeliveryTypes'] ?? [],
             'schedule' => $company['schedule'] ?? null,
             'delivery_time_text' => $company['deliveryTimeText'] ?? null,
             'delivery_price_text' => $company['deliveryPriceText'] ?? null,
         ];
+    }
+
+    /**
+     * @param  array<int, array{type: int}>  $paymentTypes
+     * @return list<int>
+     */
+    private function availablePaymentTypes(array $paymentTypes): array
+    {
+        return array_map(static fn (array $paymentType): int => (int) $paymentType['type'], $paymentTypes);
     }
 
     /**

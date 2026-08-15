@@ -67,8 +67,6 @@ return [
 
         'session_key_prefix' => env('INTERNAL_SESSION_KEY_PREFIX', 'internal-session'),
 
-        'restaurant_slug' => env('INTERNAL_RESTAURANT_SLUG'),
-
         'otp' => [
             'delivery_driver' => env('INTERNAL_OTP_DELIVERY_DRIVER', 'log'),
             'code_length' => (int) env('INTERNAL_OTP_CODE_LENGTH', 6),

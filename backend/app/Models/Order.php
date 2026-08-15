@@ -36,6 +36,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'response_payload',
     'failure_message',
 ])]
+/**
+ * @property int $payment_type
+ * @property string|null $payment_checkout_url
+ * @property string|null $external_order_id
+ */
 class Order extends Model
 {
     /** @use HasFactory<OrderFactory> */

@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\Session\SessionPickupAddressIndexController;
 use App\Http\Controllers\Api\Session\SessionRestaurantController;
 use App\Http\Controllers\Api\Session\SessionRestaurantIndexController;
 use App\Http\Controllers\Api\Session\SessionStoreController;
+use App\Http\Controllers\Api\Session\SessionPaymentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('cities', CityIndexController::class)
@@ -159,3 +160,7 @@ Route::get('orders/current/payment', OrderPaymentController::class)
 Route::get('orders/current/payment/qr', OrderPaymentQrController::class)
     ->middleware(['internal.api', 'internal.session'])
     ->name('internal.orders.current.payment.qr.show');
+
+Route::put('sessions/current/payment', SessionPaymentController::class)
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.sessions.payment.update');

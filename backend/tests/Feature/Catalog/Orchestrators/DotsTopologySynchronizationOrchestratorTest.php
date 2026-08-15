@@ -70,6 +70,39 @@ it('deactivates missing entities after a later complete Dots discovery without d
         ->and($missingAddress->refresh()->is_active)->toBeFalse();
 });
 
+it('stores empty available payment types when Dots omits them', function () {
+    Queue::fake();
+
+    mockDiscovery([
+        'cities' => ['items' => [dotsCity()], 'hasNext' => false],
+        'cityDetails' => [dotsCity()],
+        'companies' => ['11111111-1111-1111-1111-111111111111' => ['items' => [dotsCompany(['availablePaymentTypes' => null])], 'hasNext' => false]],
+        'companyDetails' => ['22222222-2222-2222-2222-222222222222' => array_replace(dotsCompany(), ['availablePaymentTypes' => null])],
+    ]);
+
+    app(DotsTopologySynchronizationOrchestrator::class)->sync();
+
+    expect(Restaurant::query()->sole()->available_payment_types)->toBe([]);
+});
+
+it('stores empty available payment types when Dots does not return the field', function () {
+    Queue::fake();
+
+    $company = dotsCompany();
+    unset($company['availablePaymentTypes']);
+
+    mockDiscovery([
+        'cities' => ['items' => [dotsCity()], 'hasNext' => false],
+        'cityDetails' => [dotsCity()],
+        'companies' => ['11111111-1111-1111-1111-111111111111' => ['items' => [$company], 'hasNext' => false]],
+        'companyDetails' => ['22222222-2222-2222-2222-222222222222' => $company],
+    ]);
+
+    app(DotsTopologySynchronizationOrchestrator::class)->sync();
+
+    expect(Restaurant::query()->sole()->available_payment_types)->toBe([]);
+});
+
 it('does not deactivate entities from an incomplete Dots discovery response', function () {
     Queue::fake();
 
@@ -147,7 +180,10 @@ function dotsCompany(array $overrides = []): array
         'image' => 'https://assets.dots.live/company.png',
         'status' => 1,
         'url' => 'papa-jon',
-        'availablePaymentTypes' => [1, 2],
+        'availablePaymentTypes' => [
+            ['type' => 1, 'title' => 'Готівкою'],
+            ['type' => 2, 'title' => 'Онлайн'],
+        ],
         'availableDeliveryTypes' => [1, 2],
         'schedule' => ['mon' => [['from' => '10:00', 'to' => '22:00']]],
         'deliveryTimeText' => '45 min',

@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Order;
 
+use App\Enums\OrderStatus;
 use App\Integrations\Dots\OrdersApi;
 use App\Models\Order;
 use App\Services\Repositories\OrderRepository;
@@ -48,10 +49,25 @@ class ResolveOrderPaymentHandler
     /** @return array{status: 'ready'|'pending', checkout_url: string|null, order: Order} */
     private function attempt(Order $order): array
     {
+        if ($order->status === OrderStatus::Creating) {
+            $confirmedOrder = $this->confirmCreated($order);
+
+            if ($confirmedOrder === null) {
+                return $this->pending($order);
+            }
+
+            $order = $confirmedOrder;
+        }
+
         try {
-            $paymentData = $this->ordersApi->getOnlinePaymentData($order->external_order_id);
+            $paymentData = $this->ordersApi->getOnlinePaymentData(
+                $order->external_order_id,
+            );
         } catch (RequestException $exception) {
-            if ($exception->response->notFound() || $exception->response->serverError()) {
+            if (
+                $exception->response->notFound()
+                || $exception->response->serverError()
+            ) {
                 Log::info('Dots online payment data is not ready.', [
                     'order_id' => $order->id,
                     'external_order_id' => $order->external_order_id,
@@ -73,6 +89,15 @@ class ResolveOrderPaymentHandler
 
         $checkoutUrl = $paymentData['onlinePayment']['checkoutUrl'] ?? null;
 
+        if ($checkoutUrl === null || $checkoutUrl === '') {
+            Log::info('Dots online payment checkout URL is not ready.', [
+                'order_id' => $order->id,
+                'external_order_id' => $order->external_order_id,
+            ]);
+
+            return $this->pending($order);
+        }
+
         if (! $this->isValidCheckoutUrl($checkoutUrl)) {
             throw ValidationException::withMessages([
                 'payment' => ['Dots returned invalid online payment data.'],
@@ -80,9 +105,57 @@ class ResolveOrderPaymentHandler
         }
 
         $snapshot = $this->paymentSnapshot($paymentData);
-        $order = $this->orders->markPaymentReady($order, $checkoutUrl, $snapshot);
+
+        $order = $this->orders->markPaymentReady(
+            $order,
+            $checkoutUrl,
+            $snapshot,
+        );
 
         return $this->ready($order);
+    }
+
+    private function confirmCreated(Order $order): ?Order
+    {
+        try {
+            $response = $this->ordersApi->get(
+                $order->external_order_id,
+            );
+        } catch (RequestException $exception) {
+            if (
+                $exception->response->notFound()
+                || $exception->response->serverError()
+            ) {
+                Log::info('Dots order creation is not confirmed yet.', [
+                    'order_id' => $order->id,
+                    'external_order_id' => $order->external_order_id,
+                    'status_code' => $exception->response->status(),
+                ]);
+
+                return null;
+            }
+
+            throw $exception;
+        } catch (ConnectionException) {
+            Log::warning('Dots order status check connection failure.', [
+                'order_id' => $order->id,
+                'external_order_id' => $order->external_order_id,
+            ]);
+
+            return null;
+        }
+
+        $order = $this->orders->markCreated(
+            $order,
+            $response,
+        );
+
+        Log::info('Dots order creation confirmed.', [
+            'order_id' => $order->id,
+            'external_order_id' => $order->external_order_id,
+        ]);
+
+        return $order;
     }
 
     /** @return array<string, mixed> */

@@ -174,13 +174,16 @@ class OrderRepository
         return $order;
     }
 
-    public function markPaymentReady(Order $order, string $checkoutUrl, array $paymentSnapshot): Order
-    {
+    public function markPaymentReady(
+        Order $order,
+        string $checkoutUrl,
+        array $paymentSnapshot,
+    ): Order {
         $order->fill([
             'payment_checkout_url' => $checkoutUrl,
             'payment_snapshot' => $paymentSnapshot,
-            'payment_received_at' => now(),
         ]);
+
         $order->save();
 
         return $order;

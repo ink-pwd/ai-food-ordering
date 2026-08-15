@@ -7,6 +7,8 @@ use App\Enums\FulfillmentType;
 use App\Enums\OrderStatus;
 use App\Enums\ReceivingType;
 use App\Enums\SessionChannel;
+use App\Enums\PaymentType;
+use App\Services\Support\PaymentSelection;
 use App\Integrations\Dots\CartPricesApi;
 use App\Integrations\Dots\FulfillmentApi;
 use App\Integrations\Dots\OrdersApi;
@@ -36,7 +38,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class CreateOrderHandler
 {
-    private const int ONLINE_PAYMENT_TYPE = 2;
 
     public function __construct(
         private readonly CityRepository $cities,
@@ -58,7 +59,11 @@ class CreateOrderHandler
     public function handle(array $session, string $plainToken, string $idempotencyKey, int $deliveryTime): array
     {
         if ($existing = $this->findExistingOrder($idempotencyKey, $session['id'])) {
-            if ($existing->payment_checkout_url === null && $existing->external_order_id !== null) {
+            if (
+                PaymentType::tryFrom((int) $existing->payment_type)?->requiresOnlinePayment() === true
+                && $existing->payment_checkout_url === null
+                && $existing->external_order_id !== null
+            ) {
                 $existing = $this->payments->handle($existing)['order'];
             }
 
@@ -70,7 +75,12 @@ class CreateOrderHandler
 
         $city = $this->resolveCity($session);
         $restaurant = $this->resolveRestaurant($session, $city);
-        $this->assertOnlinePaymentSupported($restaurant);
+        $paymentType = PaymentSelection::type($session);
+
+        PaymentSelection::assertSupported(
+            $restaurant,
+            $paymentType,
+        );
 
         $cart = $this->carts->findForSession($restaurant, $session['id']);
 
@@ -82,10 +92,14 @@ class CreateOrderHandler
         [$customerName, $customerPhone] = $this->contact($session);
 
         $context = $this->checkoutContext($plainToken, $session, $city, $restaurant);
-        $payload = $this->buildPayload($context, $cart, $customerName, $customerPhone, $deliveryTime);
+        $payload = $this->buildPayload($context, $cart, $customerName, $customerPhone, $paymentType, $deliveryTime);
         $priceValidation = $this->validatePrices($payload);
         $validatedTotal = $this->validatedTotal($priceValidation);
-        $snapshot = $this->fulfillmentSnapshot($context, $priceValidation);
+        $snapshot = $this->fulfillmentSnapshot(
+            $context,
+            $priceValidation,
+            $paymentType,
+        );
 
         $localResult = $this->createLocalOrder(
             restaurant: $restaurant,
@@ -94,6 +108,7 @@ class CreateOrderHandler
             payload: $payload,
             fulfillmentSnapshot: $snapshot,
             receivingType: $context['receiving_type'],
+            paymentType: $paymentType,
             validatedTotal: $validatedTotal,
             customerName: $customerName,
             customerPhone: $customerPhone,
@@ -104,10 +119,15 @@ class CreateOrderHandler
             return $this->result($localResult['order'], false);
         }
 
-        $this->submitToDots($localResult['order'], $payload);
-        $orderWithPayment = $this->payments->handle($localResult['order'])['order'];
+        $order = $localResult['order'];
 
-        return $this->result($orderWithPayment, true);
+        $this->submitToDots($order, $payload);
+
+        if ($paymentType->requiresOnlinePayment()) {
+            $order = $this->payments->handle($order)['order'];
+        }
+
+        return $this->result($order, true);
     }
 
     private function findExistingOrder(string $idempotencyKey, string $sessionId): ?Order
@@ -141,13 +161,26 @@ class CreateOrderHandler
         array $payload,
         array $fulfillmentSnapshot,
         ReceivingType $receivingType,
+        PaymentType $paymentType,
         string $validatedTotal,
         string $customerName,
         string $customerPhone,
         string $cartSignature,
     ): array {
         try {
-            return DB::transaction(function () use ($restaurant, $session, $idempotencyKey, $payload, $fulfillmentSnapshot, $receivingType, $validatedTotal, $customerName, $customerPhone, $cartSignature): array {
+            return DB::transaction(function () use (
+                $restaurant,
+                $session,
+                $idempotencyKey,
+                $payload,
+                $fulfillmentSnapshot,
+                $receivingType,
+                $paymentType,
+                $validatedTotal,
+                $customerName,
+                $customerPhone,
+                $cartSignature,
+            ): array {
                 $existingByKey = $this->orders->findByIdempotencyKeyForUpdate($idempotencyKey);
 
                 if ($existingByKey !== null) {
@@ -187,7 +220,7 @@ class CreateOrderHandler
                     channel: SessionChannel::from($session['channel']),
                     status: OrderStatus::Creating,
                     receivingType: $receivingType,
-                    paymentType: self::ONLINE_PAYMENT_TYPE,
+                    paymentType: $paymentType->value,
                     customerName: $customerName,
                     customerPhone: $customerPhone,
                     total: $validatedTotal,
@@ -273,15 +306,6 @@ class CreateOrderHandler
         return $restaurant;
     }
 
-    private function assertOnlinePaymentSupported(Restaurant $restaurant): void
-    {
-        $paymentTypes = array_map('intval', $restaurant->available_payment_types ?? []);
-
-        if ($paymentTypes !== [] && ! in_array(self::ONLINE_PAYMENT_TYPE, $paymentTypes, true)) {
-            throw new ConflictHttpException('Online payment is not available for this restaurant.');
-        }
-    }
-
     /**
      * @param  array<string, mixed>  $session
      * @return array<string, mixed>
@@ -359,7 +383,7 @@ class CreateOrderHandler
      * @param  array<string, mixed>  $context
      * @return array<string, mixed>
      */
-    private function buildPayload(array $context, Cart $cart, string $customerName, string $customerPhone, int $deliveryTime): array
+    private function buildPayload(array $context, Cart $cart, string $customerName, string $customerPhone, PaymentType $paymentType, int $deliveryTime): array
     {
         /** @var City $city */
         $city = $context['city'];
@@ -372,7 +396,7 @@ class CreateOrderHandler
             'userName' => $customerName,
             'userPhone' => $customerPhone,
             'deliveryType' => $context['delivery_type'],
-            'paymentType' => self::ONLINE_PAYMENT_TYPE,
+            'paymentType' => $paymentType->value,
             'deliveryTime' => $deliveryTime,
             'cartItems' => $cart->items->map(static fn ($item): array => ['id' => $item->external_product_id, 'count' => $item->quantity])->values()->all(),
         ];
@@ -460,7 +484,7 @@ class CreateOrderHandler
      * @param  array<string, mixed>  $priceValidation
      * @return array<string, mixed>
      */
-    private function fulfillmentSnapshot(array $context, array $priceValidation): array
+    private function fulfillmentSnapshot(array $context, array $priceValidation, PaymentType $paymentType): array
     {
         /** @var City $city */
         $city = $context['city'];
@@ -476,7 +500,7 @@ class CreateOrderHandler
             'dots_delivery_type' => $context['delivery_type'],
             'delivery_price' => $context['delivery_price'],
             'price_validation_delivery_price' => $priceValidation['deliveryPrice'] ?? null,
-            'payment_type' => self::ONLINE_PAYMENT_TYPE,
+            'payment_type' => $paymentType->value,
             'restaurant_address_id' => $context['restaurant_address']?->id,
             'external_address_id' => $context['restaurant_address']?->external_address_id,
             'delivery_address' => $context['delivery_address'],

@@ -74,7 +74,11 @@ it('rejects city selection before contact exists', function () {
 
 it('lists restaurants only for the selected city', function () {
     $city = City::factory()->create();
-    $selectedRestaurant = Restaurant::factory()->for($city)->create(['name' => 'Selected City Restaurant', 'is_active' => true]);
+    $selectedRestaurant = Restaurant::factory()->for($city)->create([
+        'name' => 'Selected City Restaurant',
+        'is_active' => true,
+        'available_payment_types' => [1, 2, 3],
+    ]);
     Restaurant::factory()->for($city)->create(['name' => 'Inactive Restaurant', 'is_active' => false]);
     Restaurant::factory()->create(['name' => 'Other City Restaurant', 'is_active' => true]);
     storeSelectionSession(selectionToken(), selectionSession([
@@ -85,7 +89,8 @@ it('lists restaurants only for the selected city', function () {
     $response = internalGet(route('internal.sessions.restaurants.index'))->assertOk();
 
     expect($response->json('data'))->toHaveCount(1)
-        ->and($response->json('data.0.id'))->toBe($selectedRestaurant->id);
+        ->and($response->json('data.0.id'))->toBe($selectedRestaurant->id)
+        ->and($response->json('data.0.available_payment_types'))->toBe([1, 2, 3]);
 });
 
 it('selects only active restaurants from the selected city and cannot replace selection', function () {

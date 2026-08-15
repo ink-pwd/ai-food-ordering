@@ -14,6 +14,7 @@ use App\Models\RestaurantAddress;
 use App\Services\Repositories\SessionRepository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -640,7 +641,7 @@ function orderApiScenario(): array
         'external_company_id' => 'f7add4f1-5521-11eb-9cdd-f23c92a7f68e',
         'currency' => 'UAH',
         'is_active' => true,
-        'available_payment_types' => [2],
+        'available_payment_types' => [1, 2, 3],
         'available_delivery_types' => [2],
     ]);
     $pickupAddress = RestaurantAddress::factory()->for($restaurant)->create([
@@ -727,6 +728,16 @@ function orderApiFakeSuccessfulCreation(
     $paymentAttempts = 0;
 
     Http::fake(function (Request $request) use ($externalOrderId, $paymentReady, $checkoutUrl, $paymentReadyOnAttempt, &$paymentAttempts) {
+        if (orderApiIsDotsRequest(
+            $request,
+            'GET',
+            "/api/v2/orders/{$externalOrderId}",
+        )) {
+            return Http::response([
+                'id' => $externalOrderId,
+                'status' => 'created',
+            ]);
+        }
         if (orderApiIsDotsRequest(
             $request,
             'POST',
@@ -894,7 +905,7 @@ function orderApiRecordedDotsRequest(
 function orderApiRecordedDotsRequests(
     string $method,
     string $path,
-): \Illuminate\Support\Collection {
+): Collection {
     return Http::recorded()
         ->map(
             fn (array $record): Request => $record[0],

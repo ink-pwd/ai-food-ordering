@@ -84,7 +84,7 @@ class UpdateSessionContactRequest extends FormRequest
             $normalizedPhone = '+'.substr($normalizedPhone, 2);
         } elseif (preg_match('/\A0\d{9}\z/', $normalizedPhone) === 1) {
             $normalizedPhone = '+38'.$normalizedPhone;
-        } elseif (preg_match('/\A380\d{9}\z/', $normalizedPhone) === 1) {
+        } elseif (preg_match('/\A(?:380\d{9}|34\d{9}|1\d{10})\z/', $normalizedPhone) === 1) {
             $normalizedPhone = '+'.$normalizedPhone;
         }
 
