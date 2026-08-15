@@ -1,6 +1,7 @@
 <?php
 
-use GuzzleHttp\Psr7\Request as TelegramRequest;
+use App\Telegram\Session\TelegramSessionStore;
+use App\Telegram\Support\RestaurantNavigationContext;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use SergiX44\Nutgram\Nutgram;
@@ -10,241 +11,176 @@ use SergiX44\Nutgram\Telegram\Types\User\User;
 use SergiX44\Nutgram\Testing\FakeNutgram;
 
 beforeEach(function () {
+    config()->set('cache.default', 'array');
     config()->set('services.ordering_backend.url', 'http://ordering-backend.test');
     config()->set('services.ordering_backend.token', 'internal-api-secret');
-    config()->set('services.ordering_backend.restaurant_slug', 'test-restaurant');
     config()->set('services.ordering_backend.timeout', 7);
 
     Http::preventStrayRequests();
 });
 
-test('the catalog callback requests and renders backend categories', function () {
+test('catalog resolves restaurant id through current session restaurants and renders categories', function () {
+    $sessionToken = str_repeat('c', 64);
+    storeCatalogSession($sessionToken);
+    $context = catalogContext($sessionToken);
+
     Http::fake([
-        'ordering-backend.test/api/restaurants/test-restaurant/categories' => Http::response([
+        'ordering-backend.test/api/sessions/current/restaurants' => Http::response(['data' => [catalogRestaurant()]]),
+        'ordering-backend.test/api/restaurants/pizza-house/categories' => Http::response([
+            'data' => [['id' => 7, 'name' => 'Піца']],
+        ]),
+    ]);
+
+    catalogBot()
+        ->hearCallbackQueryData("catalog:{$context}")
+        ->reply()
+        ->assertCalled('answerCallbackQuery', 1)
+        ->assertReplyMessage([
+            'text' => 'Категорії',
+            'reply_markup' => [
+                'inline_keyboard' => [
+                    [[
+                        'text' => '📂 Піца',
+                        'callback_data' => "category:7:{$context}",
+                    ]],
+                    [[
+                        'text' => '⬅️ Головне меню',
+                        'callback_data' => "main_menu:{$context}",
+                    ]],
+                ],
+            ],
+        ], index: 1, forceMethod: 'editMessageText');
+
+    Http::assertSentInOrder([
+        fn (Request $request): bool => $request->url() === 'http://ordering-backend.test/api/sessions/current/restaurants'
+            && $request->hasHeader('X-Session-Token', $sessionToken),
+        fn (Request $request): bool => $request->url() === 'http://ordering-backend.test/api/restaurants/pizza-house/categories',
+    ]);
+    Http::assertSentCount(2);
+});
+
+test('category and product callbacks preserve restaurant context and use backend returned slug', function () {
+    $sessionToken = str_repeat('p', 64);
+    storeCatalogSession($sessionToken);
+    $context = catalogContext($sessionToken);
+
+    Http::fake([
+        'ordering-backend.test/api/sessions/current/restaurants' => Http::response(['data' => [catalogRestaurant()]]),
+        'ordering-backend.test/api/restaurants/pizza-house/categories/7/products' => Http::response([
+            'data' => [[
+                'id' => 502,
+                'name' => 'Маргарита',
+                'price' => '190.00',
+                'promotion_price' => null,
+                'currency' => 'UAH',
+            ]],
+        ]),
+        'ordering-backend.test/api/restaurants/pizza-house/products/502' => Http::response([
             'data' => [
-                [
-                    'id' => 37,
-                    'name' => 'Пицца',
-                ],
-                [
-                    'id' => 41,
-                    'name' => 'Напитки',
-                ],
+                'id' => 502,
+                'name' => 'Маргарита',
+                'description' => 'Сир і томати',
+                'price' => '190.00',
+                'promotion_price' => null,
+                'currency' => 'UAH',
+                'is_available' => true,
             ],
         ]),
     ]);
 
-    catalogTelegramBot()
-        ->hearCallbackQueryData('catalog')
+    catalogBot()
+        ->hearCallbackQueryData("category:7:{$context}")
         ->reply()
-        ->assertCalled('answerCallbackQuery')
-        ->assertCalled('editMessageText')
+        ->assertCalled('answerCallbackQuery', 1)
         ->assertReplyMessage([
-            'text' => 'Категории',
-            'reply_markup' => catalogCategoriesKeyboard(),
-        ], index: 1, forceMethod: 'editMessageText')
-        ->assertRaw(function (TelegramRequest $request): bool {
-            expect((string) $request->getBody())
-                ->not->toContain('internal-api-secret')
-                ->not->toContain('X-Session-Token');
-
-            return true;
-        }, index: 1);
-
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
-        && $request->url() === 'http://ordering-backend.test/api/restaurants/test-restaurant/categories'
-        && $request->hasHeader('X-Internal-Api-Token', 'internal-api-secret')
-        && ! $request->hasHeader('X-Session-Token'));
-    Http::assertSentCount(1);
-});
-
-test('an empty category list renders safe navigation', function () {
-    Http::fake([
-        'ordering-backend.test/api/restaurants/test-restaurant/categories' => Http::response([
-            'data' => [],
-        ]),
-    ]);
-
-    catalogTelegramBot()
-        ->hearCallbackQueryData('catalog')
-        ->reply()
-        ->assertCalled('answerCallbackQuery')
-        ->assertReplyMessage([
-            'text' => 'Категории пока недоступны.',
+            'text' => 'Товари категорії',
             'reply_markup' => [
                 'inline_keyboard' => [
                     [[
-                        'text' => '⬅️ Главное меню',
-                        'callback_data' => 'main_menu',
-                    ]],
-                ],
-            ],
-        ], index: 1, forceMethod: 'editMessageText');
-});
-
-test('a category callback uses its local id and renders backend prices', function () {
-    Http::fake([
-        'ordering-backend.test/api/restaurants/test-restaurant/categories/37/products' => Http::response([
-            'data' => [
-                catalogTelegramProduct([
-                    'id' => 501,
-                    'name' => 'Pepperoni',
-                    'promotion_price' => null,
-                ]),
-                catalogTelegramProduct(),
-            ],
-        ]),
-    ]);
-
-    catalogTelegramBot()
-        ->hearCallbackQueryData('category:37')
-        ->reply()
-        ->assertCalled('answerCallbackQuery')
-        ->assertReplyMessage([
-            'text' => 'Товары категории',
-            'reply_markup' => [
-                'inline_keyboard' => [
-                    [[
-                        'text' => 'Pepperoni — 220.00 UAH',
-                        'callback_data' => 'product:37:501',
+                        'text' => '🍽 Маргарита — 190.00 UAH',
+                        'callback_data' => "product:7:502:{$context}",
                     ]],
                     [[
-                        'text' => 'Margherita — 190.00 UAH',
-                        'callback_data' => 'product:37:502',
-                    ]],
-                    [[
-                        'text' => '⬅️ Категории',
-                        'callback_data' => 'catalog',
+                        'text' => '⬅️ Категорії',
+                        'callback_data' => "catalog:{$context}",
                     ]],
                 ],
             ],
         ], index: 1, forceMethod: 'editMessageText');
 
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
-        && $request->url() === 'http://ordering-backend.test/api/restaurants/test-restaurant/categories/37/products'
-        && $request->hasHeader('X-Internal-Api-Token', 'internal-api-secret')
-        && ! $request->hasHeader('X-Session-Token'));
-    Http::assertSentCount(1);
-});
-
-test('an empty product list renders a categories back button', function () {
-    Http::fake([
-        'ordering-backend.test/api/restaurants/test-restaurant/categories/37/products' => Http::response([
-            'data' => [],
-        ]),
-    ]);
-
-    catalogTelegramBot()
-        ->hearCallbackQueryData('category:37')
+    catalogBot()
+        ->hearCallbackQueryData("product:7:502:{$context}")
         ->reply()
-        ->assertCalled('answerCallbackQuery')
+        ->assertCalled('answerCallbackQuery', 1)
         ->assertReplyMessage([
-            'text' => 'В этой категории пока нет товаров.',
+            'text' => "Маргарита\n\nСир і томати\n\nЗвичайна ціна: 190.00 UAH\nНаявність: У наявності",
             'reply_markup' => [
                 'inline_keyboard' => [
                     [[
-                        'text' => '⬅️ Категории',
-                        'callback_data' => 'catalog',
-                    ]],
-                ],
-            ],
-        ], index: 1, forceMethod: 'editMessageText');
-});
-
-test('a product callback renders backend details and stateless navigation ids', function () {
-    Http::fake([
-        'ordering-backend.test/api/restaurants/test-restaurant/products/502' => Http::response([
-            'data' => catalogTelegramProduct(),
-        ]),
-    ]);
-
-    catalogTelegramBot()
-        ->hearCallbackQueryData('product:37:502')
-        ->reply()
-        ->assertCalled('answerCallbackQuery')
-        ->assertReplyMessage([
-            'text' => "Margherita\n\nTomato, mozzarella and basil\n\nОбычная цена: 220.00 UAH\nАкционная цена: 190.00 UAH\nДоступность: В наличии",
-            'reply_markup' => [
-                'inline_keyboard' => [
-                    [[
-                        'text' => '🛒 Добавить в корзину',
-                        'callback_data' => 'cart:add:502',
+                        'text' => '🛒 Додати до кошика',
+                        'callback_data' => "cart:add:502:{$context}",
                     ]],
                     [[
                         'text' => '⬅️ Назад',
-                        'callback_data' => 'category:37',
+                        'callback_data' => "category:7:{$context}",
                     ]],
                 ],
             ],
         ], index: 1, forceMethod: 'editMessageText');
 
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
-        && $request->url() === 'http://ordering-backend.test/api/restaurants/test-restaurant/products/502'
-        && $request->hasHeader('X-Internal-Api-Token', 'internal-api-secret')
-        && ! $request->hasHeader('X-Session-Token'));
-    Http::assertSentCount(1);
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'http://ordering-backend.test/api/restaurants/pizza-house/categories/7/products');
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'http://ordering-backend.test/api/restaurants/pizza-house/products/502');
+    Http::assertSentCount(4);
 });
 
-test('main menu navigation reuses the existing keyboard without a backend request', function () {
-    catalogTelegramBot()
-        ->hearCallbackQueryData('main_menu')
+test('main menu callback validates context and renders context-aware Ukrainian buttons', function () {
+    $sessionToken = str_repeat('m', 64);
+    storeCatalogSession($sessionToken);
+    $context = catalogContext($sessionToken);
+
+    catalogBot()
+        ->hearCallbackQueryData("main_menu:{$context}")
         ->reply()
-        ->assertCalled('answerCallbackQuery')
+        ->assertCalled('answerCallbackQuery', 1)
         ->assertReplyMessage([
-            'text' => 'Приветствую! Выберите действие:',
-            'reply_markup' => [
-                'inline_keyboard' => [
-                    [[
-                        'text' => '🍕 Каталог',
-                        'callback_data' => 'catalog',
-                    ]],
-                    [[
-                        'text' => '🛒 Корзина',
-                        'callback_data' => 'menu:cart',
-                    ]],
-                ],
-            ],
+            'text' => 'Вітаємо! Оберіть дію:',
+            'reply_markup' => mainMenuKeyboard($context),
         ], index: 1, forceMethod: 'editMessageText');
 
     Http::assertNothingSent();
 });
 
-test('backend catalog failures render safe Telegram messages', function (string $failure, string $expectedMessage) {
-    $url = 'ordering-backend.test/api/restaurants/test-restaurant/categories';
+test('stale and unknown restaurant callbacks do not call catalog endpoints', function (string $case) {
+    $oldToken = str_repeat('o', 64);
+    $newToken = str_repeat('n', 64);
+    $restaurantId = $case === 'unknown' ? 999 : 10;
+    $context = $case === 'unknown'
+        ? app(RestaurantNavigationContext::class)->encode($restaurantId, $newToken)
+        : app(RestaurantNavigationContext::class)->encode($restaurantId, $oldToken);
+    storeCatalogSession($newToken);
 
-    if ($failure === 'connection') {
-        Http::fake([$url => Http::failedConnection()]);
-    } elseif ($failure === 'malformed') {
-        Http::fake([$url => Http::response(['data' => ['raw' => 'malformed-backend-detail']])]);
-    } else {
-        Http::fake([$url => Http::response([
-            'message' => 'raw-backend-error-detail',
-        ], (int) $failure)]);
-    }
+    Http::fake([
+        'ordering-backend.test/api/sessions/current/restaurants' => Http::response(['data' => [catalogRestaurant()]]),
+    ]);
 
-    catalogTelegramBot()
-        ->hearCallbackQueryData('catalog')
+    catalogBot()
+        ->hearCallbackQueryData("catalog:{$context}")
         ->reply()
-        ->assertCalled('answerCallbackQuery')
+        ->assertCalled('answerCallbackQuery', 1)
         ->assertReplyMessage([
-            'text' => $expectedMessage,
-        ], index: 1, forceMethod: 'editMessageText')
-        ->assertRaw(function (TelegramRequest $request): bool {
-            expect((string) $request->getBody())
-                ->not->toContain('raw-backend-error-detail')
-                ->not->toContain('malformed-backend-detail')
-                ->not->toContain('internal-api-secret');
+            'text' => RestaurantNavigationContext::STALE_MESSAGE,
+        ], index: 1, forceMethod: 'editMessageText');
 
-            return true;
-        }, index: 1);
-})->with([
-    'unauthorized' => ['401', 'Сервис каталога временно недоступен. Попробуйте снова позже.'],
-    'not found' => ['404', 'Каталог не найден.'],
-    'unavailable' => ['connection', 'Сервис каталога временно недоступен. Попробуйте снова позже.'],
-    'malformed response' => ['malformed', 'Сервис каталога временно недоступен. Попробуйте снова позже.'],
-]);
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/api/restaurants/pizza-house/categories'));
 
-function catalogTelegramBot(): FakeNutgram
+    if ($case === 'stale') {
+        Http::assertNothingSent();
+    } else {
+        Http::assertSentCount(1);
+    }
+})->with(['stale', 'unknown']);
+
+function catalogBot(): FakeNutgram
 {
     /** @var FakeNutgram $bot */
     $bot = app(Nutgram::class);
@@ -254,43 +190,43 @@ function catalogTelegramBot(): FakeNutgram
         ->setCommonUser(User::make(id: 654321, is_bot: false, first_name: 'Test'));
 }
 
-/**
- * @param  array<string, mixed>  $overrides
- * @return array{id: int, external_id: string, name: string, description: string, price: string, promotion_price: ?string, currency: string, image_url: string, is_available: bool, sort_order: int}
- */
-function catalogTelegramProduct(array $overrides = []): array
+function storeCatalogSession(string $sessionToken): void
+{
+    app(TelegramSessionStore::class)->put('telegram-chat-123456', $sessionToken);
+}
+
+function catalogContext(string $sessionToken, int $restaurantId = 10): string
+{
+    return app(RestaurantNavigationContext::class)->encode($restaurantId, $sessionToken);
+}
+
+/** @return array<string, mixed> */
+function catalogRestaurant(array $overrides = []): array
 {
     return array_replace([
-        'id' => 502,
-        'external_id' => 'external-product-id',
-        'name' => 'Margherita',
-        'description' => 'Tomato, mozzarella and basil',
-        'price' => '220.00',
-        'promotion_price' => '190.00',
+        'id' => 10,
+        'name' => 'Pizza House',
+        'slug' => 'pizza-house',
+        'image_url' => null,
         'currency' => 'UAH',
-        'image_url' => 'https://example.test/margherita.jpg',
-        'is_available' => true,
-        'sort_order' => 10,
+        'locale' => 'uk-UA',
+        'timezone' => 'Europe/Kyiv',
+        'available_payment_types' => [2],
+        'available_delivery_types' => [1, 2],
+        'delivery_time_text' => '45 хв',
+        'delivery_price_text' => '99 UAH',
     ], $overrides);
 }
 
 /** @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>} */
-function catalogCategoriesKeyboard(): array
+function mainMenuKeyboard(string $context): array
 {
     return [
         'inline_keyboard' => [
-            [[
-                'text' => 'Пицца',
-                'callback_data' => 'category:37',
-            ]],
-            [[
-                'text' => 'Напитки',
-                'callback_data' => 'category:41',
-            ]],
-            [[
-                'text' => '⬅️ Главное меню',
-                'callback_data' => 'main_menu',
-            ]],
+            [['text' => '🍕 Каталог', 'callback_data' => "catalog:{$context}"]],
+            [['text' => '🛒 Кошик', 'callback_data' => "menu:cart:{$context}"]],
+            [['text' => '🚚 Спосіб отримання', 'callback_data' => "fulfillment:menu:{$context}"]],
+            [['text' => '🚪 Вийти', 'callback_data' => 'exit']],
         ],
     ];
 }

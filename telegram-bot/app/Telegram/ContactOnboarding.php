@@ -15,7 +15,7 @@ final class ContactOnboarding
     {
         $this->request(
             bot: $bot,
-            message: 'Чтобы продолжить, поделитесь своим контактом.',
+            message: 'Щоб продовжити, надішліть свій номер телефону.',
         );
     }
 
@@ -23,7 +23,7 @@ final class ContactOnboarding
     {
         $this->request(
             bot: $bot,
-            message: 'Сессия истекла. Пожалуйста, снова поделитесь контактом.',
+            message: 'Сесію завершено. Почнімо спочатку: надішліть свій номер телефону.',
         );
     }
 
@@ -31,7 +31,7 @@ final class ContactOnboarding
     {
         $this->request(
             bot: $bot,
-            message: 'Сервис временно недоступен. Попробуйте снова позже.',
+            message: 'Сервіс тимчасово недоступний. Спробуйте пізніше.',
         );
     }
 

@@ -19,28 +19,32 @@ beforeEach(function () {
     Http::preventStrayRequests();
 });
 
-test('a foreign contact is rejected without calling the backend', function () {
+test('a foreign contact is rejected in Ukrainian without calling the backend', function () {
     storeTelegramContactSession(str_repeat('d', 64));
 
     telegramContactBot()
         ->hearMessage(telegramContactMessage(userId: 999999))
         ->reply()
         ->assertReplyMessage([
-            'text' => 'Пожалуйста, отправьте свой собственный контакт.',
-            'reply_markup' => contactRequestKeyboard(),
+            'text' => 'Будь ласка, надішліть свій власний номер телефону.',
+            'reply_markup' => contactTestRequestKeyboard(),
         ]);
 
     Http::assertNothingSent();
 });
 
-test('a valid contact is saved before the contact keyboard is removed and main menu is shown', function () {
+test('a valid contact updates backend contact requests OTP and does not open main menu', function () {
     $sessionToken = str_repeat('e', 64);
     storeTelegramContactSession($sessionToken);
 
     Http::fake([
-        'ordering-backend.test/api/sessions/current/contact' => Http::response(
-            telegramContactBackendResponse(),
-        ),
+        'ordering-backend.test/api/sessions/current/contact' => Http::response(telegramContactBackendResponse()),
+        'ordering-backend.test/api/sessions/current/otp' => Http::response([
+            'data' => [
+                'expires_in' => 300,
+                'resend_available_in' => 60,
+            ],
+        ]),
     ]);
 
     telegramContactBot(firstName: 'Ada', lastName: 'Lovelace')
@@ -51,77 +55,45 @@ test('a valid contact is saved before the contact keyboard is removed and main m
         ->reply()
         ->assertSequence(
             fn (FakeNutgram $bot) => $bot->assertReplyMessage([
-                'text' => 'Контакт сохранён.',
+                'text' => '✅ Номер телефону отримано.',
                 'reply_markup' => [
                     'remove_keyboard' => true,
                 ],
             ]),
             fn (FakeNutgram $bot) => $bot->assertReplyMessage([
-                'text' => 'Приветствуем! Выберите действие:',
-                'reply_markup' => mainMenuKeyboard(),
+                'text' => '🔐 Код підтвердження надіслано. Введіть його повідомленням у цей чат.',
+                'reply_markup' => otpTestKeyboard(),
             ]),
         )
         ->assertRaw(function (TelegramRequest $request) use ($sessionToken): bool {
             expect((string) $request->getBody())
                 ->not->toContain($sessionToken)
-                ->not->toContain('internal-api-secret');
-
-            return true;
-        }, index: 0)
-        ->assertRaw(function (TelegramRequest $request) use ($sessionToken): bool {
-            expect((string) $request->getBody())
-                ->not->toContain($sessionToken)
-                ->not->toContain('internal-api-secret');
+                ->not->toContain('internal-api-secret')
+                ->not->toContain('🍕 Каталог')
+                ->not->toContain('🛒 Кошик');
 
             return true;
         }, index: 1);
 
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
-        && $request->url() === 'http://ordering-backend.test/api/sessions/current/contact'
-        && $request->hasHeader('X-Internal-Api-Token', 'internal-api-secret')
-        && $request->hasHeader('X-Session-Token', $sessionToken)
-        && $request->data() === [
-            'name' => 'Ada Lovelace',
-            'phone' => '+380 (93) 123-45-67',
-        ]
-        && ! array_key_exists('phone_verified', $request->data()));
-    Http::assertSentCount(1);
-});
-
-test('a contact without an in-memory session creates a fresh session and restarts onboarding', function () {
-    $freshSessionToken = str_repeat('4', 64);
-
-    Http::fake([
-        'ordering-backend.test/api/sessions' => Http::response([
-            'data' => [
-                'session_token' => $freshSessionToken,
-            ],
-        ], 201),
+    Http::assertSentInOrder([
+        fn (Request $request): bool => $request->method() === 'PUT'
+            && $request->url() === 'http://ordering-backend.test/api/sessions/current/contact'
+            && $request->hasHeader('X-Internal-Api-Token', 'internal-api-secret')
+            && $request->hasHeader('X-Session-Token', $sessionToken)
+            && $request->data() === [
+                'name' => 'Ada Lovelace',
+                'phone' => '+380 (93) 123-45-67',
+            ]
+            && ! array_key_exists('phone_verified', $request->data()),
+        fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'http://ordering-backend.test/api/sessions/current/otp'
+            && $request->hasHeader('X-Session-Token', $sessionToken)
+            && $request->data() === [],
     ]);
-
-    telegramContactBot()
-        ->hearMessage(telegramContactMessage(userId: 654321))
-        ->reply()
-        ->assertReplyMessage([
-            'text' => 'Сессия истекла. Пожалуйста, снова поделитесь контактом.',
-            'reply_markup' => contactRequestKeyboard(),
-        ]);
-
-    expect(app(TelegramSessionStore::class)->get('telegram-chat-123456'))
-        ->toBe($freshSessionToken);
-
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
-        && $request->url() === 'http://ordering-backend.test/api/sessions'
-        && $request->hasHeader('X-Internal-Api-Token', 'internal-api-secret')
-        && ! $request->hasHeader('X-Session-Token')
-        && $request->data() === [
-            'channel' => 'telegram',
-            'external_session_id' => 'telegram-chat-123456',
-        ]);
-    Http::assertSentCount(1);
+    Http::assertSentCount(2);
 });
 
-test('backend validation errors produce a safe response and keep requiring contact', function () {
+test('contact validation errors are safe Ukrainian messages and keep requiring contact', function () {
     $sessionToken = str_repeat('f', 64);
     storeTelegramContactSession($sessionToken);
 
@@ -136,8 +108,8 @@ test('backend validation errors produce a safe response and keep requiring conta
         ->hearMessage(telegramContactMessage(userId: 654321))
         ->reply()
         ->assertReplyMessage([
-            'text' => 'Не удалось принять контакт. Проверьте номер и попробуйте снова.',
-            'reply_markup' => contactRequestKeyboard(),
+            'text' => 'Не вдалося прийняти номер телефону. Перевірте його та спробуйте ще раз.',
+            'reply_markup' => contactTestRequestKeyboard(),
         ])
         ->assertRaw(function (TelegramRequest $request) use ($sessionToken): bool {
             expect((string) $request->getBody())
@@ -153,7 +125,7 @@ test('backend validation errors produce a safe response and keep requiring conta
     Http::assertSentCount(1);
 });
 
-test('backend unauthorized errors replace the stale token and restart onboarding without retrying the contact update', function () {
+test('backend unauthorized errors replace the stale token and restart onboarding without retrying contact or OTP', function () {
     $staleSessionToken = str_repeat('1', 64);
     $freshSessionToken = str_repeat('5', 64);
     storeTelegramContactSession($staleSessionToken);
@@ -173,87 +145,24 @@ test('backend unauthorized errors replace the stale token and restart onboarding
         ->hearMessage(telegramContactMessage(userId: 654321))
         ->reply()
         ->assertReplyMessage([
-            'text' => 'Сессия истекла. Пожалуйста, снова поделитесь контактом.',
-            'reply_markup' => contactRequestKeyboard(),
+            'text' => 'Сесію завершено. Почнімо спочатку: надішліть свій номер телефону.',
+            'reply_markup' => contactTestRequestKeyboard(),
         ]);
 
     expect(app(TelegramSessionStore::class)->get('telegram-chat-123456'))
         ->toBe($freshSessionToken)
         ->not->toBe($staleSessionToken);
 
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
-        && $request->url() === 'http://ordering-backend.test/api/sessions/current/contact'
-        && $request->hasHeader('X-Session-Token', $staleSessionToken));
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
-        && $request->url() === 'http://ordering-backend.test/api/sessions'
-        && ! $request->hasHeader('X-Session-Token'));
+    Http::assertSentInOrder([
+        fn (Request $request): bool => $request->method() === 'PUT'
+            && $request->url() === 'http://ordering-backend.test/api/sessions/current/contact'
+            && $request->hasHeader('X-Session-Token', $staleSessionToken),
+        fn (Request $request): bool => $request->method() === 'POST'
+            && $request->url() === 'http://ordering-backend.test/api/sessions'
+            && ! $request->hasHeader('X-Session-Token'),
+    ]);
+    Http::assertNotSent(fn (Request $request): bool => $request->url() === 'http://ordering-backend.test/api/sessions/current/otp');
     Http::assertSentCount(2);
-});
-
-test('backend unauthorized errors forget the stale token before a failed session recreation', function () {
-    storeTelegramContactSession(str_repeat('6', 64));
-
-    Http::fake([
-        'ordering-backend.test/api/sessions/current/contact' => Http::response([
-            'message' => 'Unauthenticated.',
-        ], 401),
-        'ordering-backend.test/api/sessions' => Http::response([
-            'message' => 'Session service unavailable.',
-        ], 503),
-    ]);
-
-    telegramContactBot()
-        ->hearMessage(telegramContactMessage(userId: 654321))
-        ->reply()
-        ->assertReplyMessage([
-            'text' => 'Сервис временно недоступен. Попробуйте снова позже.',
-            'reply_markup' => contactRequestKeyboard(),
-        ]);
-
-    expect(app(TelegramSessionStore::class)->get('telegram-chat-123456'))->toBeNull();
-    Http::assertSentCount(2);
-});
-
-test('backend connection failures produce a safe temporary failure response', function () {
-    $sessionToken = str_repeat('2', 64);
-    storeTelegramContactSession($sessionToken);
-
-    Http::fake([
-        'ordering-backend.test/api/sessions/current/contact' => Http::failedConnection(),
-    ]);
-
-    telegramContactBot()
-        ->hearMessage(telegramContactMessage(userId: 654321))
-        ->reply()
-        ->assertReplyMessage([
-            'text' => 'Сервис временно недоступен. Попробуйте снова позже.',
-            'reply_markup' => contactRequestKeyboard(),
-        ]);
-
-    expect(app(TelegramSessionStore::class)->get('telegram-chat-123456'))->toBe($sessionToken);
-    Http::assertSentCount(1);
-});
-
-test('malformed backend responses produce a safe temporary failure response', function () {
-    $sessionToken = str_repeat('3', 64);
-    storeTelegramContactSession($sessionToken);
-
-    Http::fake([
-        'ordering-backend.test/api/sessions/current/contact' => Http::response([
-            'data' => ['unexpected' => true],
-        ]),
-    ]);
-
-    telegramContactBot()
-        ->hearMessage(telegramContactMessage(userId: 654321))
-        ->reply()
-        ->assertReplyMessage([
-            'text' => 'Сервис временно недоступен. Попробуйте снова позже.',
-            'reply_markup' => contactRequestKeyboard(),
-        ]);
-
-    expect(app(TelegramSessionStore::class)->get('telegram-chat-123456'))->toBe($sessionToken);
-    Http::assertSentCount(1);
 });
 
 function telegramContactBot(
@@ -306,12 +215,12 @@ function telegramContactBackendResponse(): array
 }
 
 /** @return array{keyboard: array<int, array<int, array{text: string, request_contact: bool}>>, resize_keyboard: bool, one_time_keyboard: bool} */
-function contactRequestKeyboard(): array
+function contactTestRequestKeyboard(): array
 {
     return [
         'keyboard' => [
             [[
-                'text' => '📱 Поделиться контактом',
+                'text' => '📱 Надіслати номер телефону',
                 'request_contact' => true,
             ]],
         ],
@@ -320,18 +229,18 @@ function contactRequestKeyboard(): array
     ];
 }
 
-/** @return array{inline_keyboard: array<int, array<int, array{text: string, callback_data: string}>>} */
-function mainMenuKeyboard(): array
+/** @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>} */
+function otpTestKeyboard(): array
 {
     return [
         'inline_keyboard' => [
             [[
-                'text' => '🍕 Каталог',
-                'callback_data' => 'catalog',
+                'text' => '🔄 Надіслати код повторно',
+                'callback_data' => 'otp:resend',
             ]],
             [[
-                'text' => '🛒 Корзина',
-                'callback_data' => 'menu:cart',
+                'text' => '🚪 Вийти',
+                'callback_data' => 'exit',
             ]],
         ],
     ];

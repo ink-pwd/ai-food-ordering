@@ -5,7 +5,6 @@ namespace App\Telegram\Handlers;
 use App\Exceptions\OrderingBackendException;
 use App\Integrations\OrderingBackend\OrderingBackendClient;
 use App\Telegram\ContactOnboarding;
-use App\Telegram\Keyboards\MainMenuKeyboard;
 use App\Telegram\Session\TelegramSessionRecovery;
 use Illuminate\Support\Str;
 use SergiX44\Nutgram\Nutgram;
@@ -18,7 +17,7 @@ final class ContactHandler
         private readonly TelegramSessionRecovery $sessionRecovery,
         private readonly OrderingBackendClient $backend,
         private readonly ContactOnboarding $onboarding,
-        private readonly MainMenuKeyboard $mainMenu,
+        private readonly OnboardingFlow $onboardingFlow,
     ) {}
 
     public function __invoke(Nutgram $bot): void
@@ -27,7 +26,7 @@ final class ContactHandler
         $sender = $bot->user();
 
         if ($contact?->user_id === null || $sender === null || $contact->user_id !== $sender->id) {
-            $this->onboarding->request($bot, 'Пожалуйста, отправьте свой собственный контакт.');
+            $this->onboarding->request($bot, 'Будь ласка, надішліть свій власний номер телефону.');
 
             return;
         }
@@ -51,14 +50,11 @@ final class ContactHandler
         }
 
         $bot->sendMessage(
-            text: 'Контакт сохранён.',
+            text: '✅ Номер телефону отримано.',
             reply_markup: ReplyKeyboardRemove::make(remove_keyboard: true),
         );
 
-        $bot->sendMessage(
-            text: 'Приветствуем! Выберите действие:',
-            reply_markup: $this->mainMenu->make(),
-        );
+        $this->onboardingFlow->requestOtp($bot, $sessionToken);
     }
 
     private function telegramName(User $sender): string
@@ -77,7 +73,7 @@ final class ContactHandler
         if ($exception->statusCode() === 422) {
             $this->onboarding->request(
                 $bot,
-                'Не удалось принять контакт. Проверьте номер и попробуйте снова.',
+                'Не вдалося прийняти номер телефону. Перевірте його та спробуйте ще раз.',
             );
 
             return;

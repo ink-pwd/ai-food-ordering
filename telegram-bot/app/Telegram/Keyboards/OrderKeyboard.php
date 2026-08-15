@@ -7,47 +7,86 @@ use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 final class OrderKeyboard
 {
-    public function make(string $status): InlineKeyboardMarkup
+    public function order(string $status, string $context): InlineKeyboardMarkup
     {
         $keyboard = InlineKeyboardMarkup::make();
 
         if ($status === 'creating') {
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: '🔄 Обновить статус',
-                callback_data: 'order:refresh',
+                text: '🔄 Оновити замовлення',
+                callback_data: "order:refresh:{$context}",
             ));
         }
 
-        return $this->addMainMenu($keyboard);
+        return $this->addExit($keyboard);
     }
 
-    public function statusCheck(): InlineKeyboardMarkup
+    public function paymentPending(string $context): InlineKeyboardMarkup
     {
-        return $this->addMainMenu(
-            InlineKeyboardMarkup::make()
-                ->addRow(InlineKeyboardButton::make(
-                    text: '🔄 Проверить заказ',
-                    callback_data: 'order:refresh',
-                )),
-        );
+        return InlineKeyboardMarkup::make()
+            ->addRow(InlineKeyboardButton::make(
+                text: '🔄 Оновити оплату',
+                callback_data: "payment:refresh:{$context}",
+            ))
+            ->addRow(InlineKeyboardButton::make(
+                text: '🚪 Вийти',
+                callback_data: 'exit',
+            ));
     }
 
-    public function backToCart(): InlineKeyboardMarkup
+    public function paymentReady(string $checkoutUrl, string $context, bool $includePayButton = true): InlineKeyboardMarkup
     {
-        return $this->addMainMenu(
-            InlineKeyboardMarkup::make()
-                ->addRow(InlineKeyboardButton::make(
-                    text: '🛒 Вернуться в корзину',
-                    callback_data: 'menu:cart',
-                )),
-        );
+        $keyboard = InlineKeyboardMarkup::make();
+
+        if ($includePayButton) {
+            $keyboard->addRow(InlineKeyboardButton::make(
+                text: '💳 Оплатити',
+                url: $checkoutUrl,
+            ));
+        }
+
+        return $keyboard
+            ->addRow(InlineKeyboardButton::make(
+                text: '🔄 Оновити оплату',
+                callback_data: "payment:refresh:{$context}",
+            ))
+            ->addRow(InlineKeyboardButton::make(
+                text: '🚪 Вийти',
+                callback_data: 'exit',
+            ));
     }
 
-    private function addMainMenu(InlineKeyboardMarkup $keyboard): InlineKeyboardMarkup
+    public function statusCheck(string $context): InlineKeyboardMarkup
+    {
+        return InlineKeyboardMarkup::make()
+            ->addRow(InlineKeyboardButton::make(
+                text: '🔄 Оновити замовлення',
+                callback_data: "order:refresh:{$context}",
+            ))
+            ->addRow(InlineKeyboardButton::make(
+                text: '🚪 Вийти',
+                callback_data: 'exit',
+            ));
+    }
+
+    public function backToCart(string $context): InlineKeyboardMarkup
+    {
+        return InlineKeyboardMarkup::make()
+            ->addRow(InlineKeyboardButton::make(
+                text: '🛒 Повернутися до кошика',
+                callback_data: "menu:cart:{$context}",
+            ))
+            ->addRow(InlineKeyboardButton::make(
+                text: '🚪 Вийти',
+                callback_data: 'exit',
+            ));
+    }
+
+    private function addExit(InlineKeyboardMarkup $keyboard): InlineKeyboardMarkup
     {
         return $keyboard->addRow(InlineKeyboardButton::make(
-            text: '⬅️ Главное меню',
-            callback_data: 'main_menu',
+            text: '🚪 Вийти',
+            callback_data: 'exit',
         ));
     }
 }

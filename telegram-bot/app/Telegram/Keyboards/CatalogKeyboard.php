@@ -10,27 +10,27 @@ final class CatalogKeyboard
     /**
      * @param  list<array{id: int, name: string}>  $categories
      */
-    public function categories(array $categories): InlineKeyboardMarkup
+    public function categories(array $categories, string $context): InlineKeyboardMarkup
     {
         $keyboard = InlineKeyboardMarkup::make();
 
         foreach ($categories as $category) {
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: $category['name'],
-                callback_data: "category:{$category['id']}",
+                text: "📂 {$category['name']}",
+                callback_data: "category:{$category['id']}:{$context}",
             ));
         }
 
         return $keyboard->addRow(InlineKeyboardButton::make(
-            text: '⬅️ Главное меню',
-            callback_data: 'main_menu',
+            text: '⬅️ Головне меню',
+            callback_data: "main_menu:{$context}",
         ));
     }
 
     /**
      * @param  list<array{id: int, name: string, price: string, promotion_price: ?string, currency: string}>  $products
      */
-    public function products(int $categoryId, array $products): InlineKeyboardMarkup
+    public function products(int $categoryId, array $products, string $context): InlineKeyboardMarkup
     {
         $keyboard = InlineKeyboardMarkup::make();
 
@@ -38,36 +38,36 @@ final class CatalogKeyboard
             $displayPrice = $product['promotion_price'] ?? $product['price'];
 
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: "{$product['name']} — {$displayPrice} {$product['currency']}",
-                callback_data: "product:{$categoryId}:{$product['id']}",
+                text: "🍽 {$product['name']} — {$displayPrice} {$product['currency']}",
+                callback_data: "product:{$categoryId}:{$product['id']}:{$context}",
             ));
         }
 
         return $keyboard->addRow(InlineKeyboardButton::make(
-            text: '⬅️ Категории',
-            callback_data: 'catalog',
+            text: '⬅️ Категорії',
+            callback_data: "catalog:{$context}",
         ));
     }
 
-    public function product(int $categoryId, int $productId): InlineKeyboardMarkup
+    public function product(int $categoryId, int $productId, string $context): InlineKeyboardMarkup
     {
         return InlineKeyboardMarkup::make()
             ->addRow(InlineKeyboardButton::make(
-                text: '🛒 Добавить в корзину',
-                callback_data: "cart:add:{$productId}",
+                text: '🛒 Додати до кошика',
+                callback_data: "cart:add:{$productId}:{$context}",
             ))
             ->addRow(InlineKeyboardButton::make(
                 text: '⬅️ Назад',
-                callback_data: "category:{$categoryId}",
+                callback_data: "category:{$categoryId}:{$context}",
             ));
     }
 
-    public function backToCategory(int $categoryId): InlineKeyboardMarkup
+    public function backToCategory(int $categoryId, string $context): InlineKeyboardMarkup
     {
         return InlineKeyboardMarkup::make()
             ->addRow(InlineKeyboardButton::make(
                 text: '⬅️ Назад',
-                callback_data: "category:{$categoryId}",
+                callback_data: "category:{$categoryId}:{$context}",
             ));
     }
 }

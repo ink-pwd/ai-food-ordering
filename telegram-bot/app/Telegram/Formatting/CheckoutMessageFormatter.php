@@ -10,14 +10,14 @@ final class CheckoutMessageFormatter
     public function confirmation(array $cart): string
     {
         return implode("\n\n", [
-            'Оформление заказа',
+            'Оформлення замовлення',
             implode("\n", [
-                'Самовывоз',
-                'Оплата наличными',
-                'Время: как можно скорее',
+                'Самовивіз',
+                'Оплата готівкою',
+                'Час: якнайшвидше',
             ]),
-            "Итого: {$cart['total']} {$cart['currency']}",
-            'Подтвердить заказ?',
+            "Разом: {$cart['total']} {$cart['currency']}",
+            'Підтвердити замовлення?',
         ]);
     }
 }

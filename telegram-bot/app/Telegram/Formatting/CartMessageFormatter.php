@@ -9,10 +9,10 @@ final class CartMessageFormatter
      */
     public function format(array $cart): string
     {
-        $sections = ['🛒 Корзина'];
+        $sections = ['🛒 Кошик'];
 
         if ($cart['items'] === []) {
-            $sections[] = 'Корзина пуста.';
+            $sections[] = 'Кошик порожній.';
         } else {
             foreach ($cart['items'] as $item) {
                 $sections[] = implode("\n", [
@@ -23,8 +23,8 @@ final class CartMessageFormatter
         }
 
         $sections[] = implode("\n", [
-            "Подытог: {$cart['subtotal']} {$cart['currency']}",
-            "Итого: {$cart['total']} {$cart['currency']}",
+            "Проміжний підсумок: {$cart['subtotal']} {$cart['currency']}",
+            "Разом: {$cart['total']} {$cart['currency']}",
         ]);
 
         return implode("\n\n", $sections);

@@ -6,12 +6,12 @@ final class CatalogMessageFormatter
 {
     public function categories(): string
     {
-        return 'Категории';
+        return 'Категорії';
     }
 
     public function products(): string
     {
-        return 'Товары категории';
+        return 'Товари категорії';
     }
 
     /**
@@ -25,13 +25,13 @@ final class CatalogMessageFormatter
             $sections[] = $product['description'];
         }
 
-        $priceLines = ["Обычная цена: {$product['price']} {$product['currency']}"];
+        $priceLines = ["Звичайна ціна: {$product['price']} {$product['currency']}"];
 
         if ($product['promotion_price'] !== null) {
-            $priceLines[] = "Акционная цена: {$product['promotion_price']} {$product['currency']}";
+            $priceLines[] = "Акційна ціна: {$product['promotion_price']} {$product['currency']}";
         }
 
-        $priceLines[] = 'Доступность: '.($product['is_available'] ? 'В наличии' : 'Нет в наличии');
+        $priceLines[] = 'Наявність: '.($product['is_available'] ? 'У наявності' : 'Немає в наявності');
         $sections[] = implode("\n", $priceLines);
 
         return implode("\n\n", $sections);

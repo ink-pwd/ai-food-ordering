@@ -10,31 +10,31 @@ final class CartKeyboard
     /**
      * @param  list<array{id: int, product_id: int, external_product_id: string, name: string, quantity: int, unit_price: string, total: string}>  $items
      */
-    public function make(array $items = [], string $status = 'active'): InlineKeyboardMarkup
+    public function make(array $items = [], string $status = 'active', string $context = ''): InlineKeyboardMarkup
     {
         $keyboard = InlineKeyboardMarkup::make();
 
         foreach ($items as $cartItem) {
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: $cartItem['name'],
-                callback_data: "cart:noop:{$cartItem['id']}",
+                text: "🍽 {$cartItem['name']}",
+                callback_data: "cart:noop:{$cartItem['id']}:{$context}",
             ))->addRow(
                 InlineKeyboardButton::make(
                     text: '➖',
-                    callback_data: "cart:dec:{$cartItem['id']}",
+                    callback_data: "cart:dec:{$cartItem['id']}:{$context}",
                 ),
                 InlineKeyboardButton::make(
-                    text: (string) $cartItem['quantity'],
-                    callback_data: "cart:noop:{$cartItem['id']}",
+                    text: "🔢 {$cartItem['quantity']}",
+                    callback_data: "cart:noop:{$cartItem['id']}:{$context}",
                 ),
                 InlineKeyboardButton::make(
                     text: '➕',
-                    callback_data: "cart:inc:{$cartItem['id']}",
+                    callback_data: "cart:inc:{$cartItem['id']}:{$context}",
                 ),
             )->addRow(
                 InlineKeyboardButton::make(
-                    text: '🗑 Удалить',
-                    callback_data: "cart:remove:{$cartItem['id']}",
+                    text: '🗑 Видалити',
+                    callback_data: "cart:remove:{$cartItem['id']}:{$context}",
                 ),
             );
         }
@@ -42,55 +42,63 @@ final class CartKeyboard
         if ($items !== []) {
             if ($status === 'active') {
                 $keyboard->addRow(InlineKeyboardButton::make(
-                    text: '✅ Оформить заказ',
-                    callback_data: 'checkout',
+                    text: '✅ Оформити замовлення',
+                    callback_data: "checkout:{$context}",
                 ));
             }
 
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: '🧹 Очистить корзину',
-                callback_data: 'cart:clear',
+                text: '🧹 Очистити кошик',
+                callback_data: "cart:clear:{$context}",
             ));
         }
 
         return $keyboard
             ->addRow(InlineKeyboardButton::make(
-                text: $items === [] ? '🍕 Перейти в каталог' : '🍕 Продолжить покупки',
-                callback_data: 'catalog',
+                text: $items === [] ? '🍕 Перейти до каталогу' : '🍕 Продовжити покупки',
+                callback_data: "catalog:{$context}",
             ))
             ->addRow(InlineKeyboardButton::make(
-                text: '⬅️ Главное меню',
-                callback_data: 'main_menu',
+                text: '⬅️ Головне меню',
+                callback_data: "main_menu:{$context}",
+            ))
+            ->addRow(InlineKeyboardButton::make(
+                text: '🚪 Вийти',
+                callback_data: 'exit',
             ));
     }
 
-    public function clearConfirmation(): InlineKeyboardMarkup
+    public function clearConfirmation(string $context): InlineKeyboardMarkup
     {
         return InlineKeyboardMarkup::make()
             ->addRow(InlineKeyboardButton::make(
-                text: '✅ Да, очистить',
-                callback_data: 'cart:clear:confirm',
+                text: '✅ Так, очистити',
+                callback_data: "cart:clear:confirm:{$context}",
             ))
             ->addRow(InlineKeyboardButton::make(
-                text: '❌ Отмена',
-                callback_data: 'cart:clear:cancel',
+                text: '❌ Скасувати',
+                callback_data: "cart:clear:cancel:{$context}",
             ));
     }
 
-    public function duplicateProduct(): InlineKeyboardMarkup
+    public function duplicateProduct(string $context): InlineKeyboardMarkup
     {
         return InlineKeyboardMarkup::make()
             ->addRow(InlineKeyboardButton::make(
-                text: '🛒 Открыть корзину',
-                callback_data: 'menu:cart',
+                text: '🛒 Відкрити кошик',
+                callback_data: "menu:cart:{$context}",
             ))
             ->addRow(InlineKeyboardButton::make(
-                text: '🍕 Продолжить покупки',
-                callback_data: 'catalog',
+                text: '🍕 Продовжити покупки',
+                callback_data: "catalog:{$context}",
             ))
             ->addRow(InlineKeyboardButton::make(
-                text: '⬅️ Главное меню',
-                callback_data: 'main_menu',
+                text: '⬅️ Головне меню',
+                callback_data: "main_menu:{$context}",
+            ))
+            ->addRow(InlineKeyboardButton::make(
+                text: '🚪 Вийти',
+                callback_data: 'exit',
             ));
     }
 }

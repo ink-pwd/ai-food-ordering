@@ -8,6 +8,8 @@ use App\Telegram\CallbackAcknowledger;
 use App\Telegram\Formatting\CatalogMessageFormatter;
 use App\Telegram\Keyboards\CatalogKeyboard;
 use App\Telegram\Keyboards\MainMenuKeyboard;
+use App\Telegram\Session\TelegramSessionRecovery;
+use App\Telegram\Support\RestaurantNavigationContext;
 use App\Telegram\TelegramMessageEditor;
 use SergiX44\Nutgram\Nutgram;
 
@@ -15,26 +17,34 @@ final class CatalogHandler
 {
     public function __construct(
         private readonly CallbackAcknowledger $callbackAcknowledger,
+        private readonly TelegramSessionRecovery $sessionRecovery,
         private readonly OrderingBackendClient $backend,
         private readonly CatalogKeyboard $keyboard,
         private readonly CatalogMessageFormatter $formatter,
         private readonly MainMenuKeyboard $mainMenu,
+        private readonly RestaurantNavigationContext $navigationContext,
         private readonly TelegramMessageEditor $messageEditor,
     ) {}
 
-    public function catalog(Nutgram $bot): void
+    public function catalog(Nutgram $bot, int $restaurantId, string $fingerprint): void
     {
         if (! $this->callbackAcknowledger->acknowledge($bot)) {
             return;
         }
 
+        $context = $this->restaurantContext($bot, $restaurantId, $fingerprint);
+
+        if ($context === null) {
+            return;
+        }
+
         try {
-            $categories = $this->backend->categories();
+            $categories = $this->backend->categories($context['restaurantSlug']);
         } catch (OrderingBackendException $exception) {
             $this->messageEditor->edit(
                 bot: $bot,
-                text: $this->failureMessage($exception, 'Каталог не найден.'),
-                keyboard: $this->keyboard->categories([]),
+                text: $this->failureMessage($exception, 'Каталог не знайдено.'),
+                keyboard: $this->keyboard->categories([], $context['callbackContext']),
             );
 
             return;
@@ -42,24 +52,30 @@ final class CatalogHandler
 
         $this->messageEditor->edit(
             bot: $bot,
-            text: $categories === [] ? 'Категории пока недоступны.' : $this->formatter->categories(),
-            keyboard: $this->keyboard->categories($categories),
+            text: $categories === [] ? 'Категорії поки недоступні.' : $this->formatter->categories(),
+            keyboard: $this->keyboard->categories($categories, $context['callbackContext']),
         );
     }
 
-    public function category(Nutgram $bot, int $categoryId): void
+    public function category(Nutgram $bot, int $categoryId, int $restaurantId, string $fingerprint): void
     {
         if (! $this->callbackAcknowledger->acknowledge($bot)) {
             return;
         }
 
+        $context = $this->restaurantContext($bot, $restaurantId, $fingerprint);
+
+        if ($context === null) {
+            return;
+        }
+
         try {
-            $products = $this->backend->categoryProducts($categoryId);
+            $products = $this->backend->categoryProducts($context['restaurantSlug'], $categoryId);
         } catch (OrderingBackendException $exception) {
             $this->messageEditor->edit(
                 bot: $bot,
-                text: $this->failureMessage($exception, 'Категория не найдена.'),
-                keyboard: $this->keyboard->products($categoryId, []),
+                text: $this->failureMessage($exception, 'Категорію не знайдено.'),
+                keyboard: $this->keyboard->products($categoryId, [], $context['callbackContext']),
             );
 
             return;
@@ -67,24 +83,30 @@ final class CatalogHandler
 
         $this->messageEditor->edit(
             bot: $bot,
-            text: $products === [] ? 'В этой категории пока нет товаров.' : $this->formatter->products(),
-            keyboard: $this->keyboard->products($categoryId, $products),
+            text: $products === [] ? 'У цій категорії поки немає товарів.' : $this->formatter->products(),
+            keyboard: $this->keyboard->products($categoryId, $products, $context['callbackContext']),
         );
     }
 
-    public function product(Nutgram $bot, int $categoryId, int $productId): void
+    public function product(Nutgram $bot, int $categoryId, int $productId, int $restaurantId, string $fingerprint): void
     {
         if (! $this->callbackAcknowledger->acknowledge($bot)) {
             return;
         }
 
+        $context = $this->restaurantContext($bot, $restaurantId, $fingerprint);
+
+        if ($context === null) {
+            return;
+        }
+
         try {
-            $product = $this->backend->product($productId);
+            $product = $this->backend->product($context['restaurantSlug'], $productId);
         } catch (OrderingBackendException $exception) {
             $this->messageEditor->edit(
                 bot: $bot,
-                text: $this->failureMessage($exception, 'Товар не найден.'),
-                keyboard: $this->keyboard->backToCategory($categoryId),
+                text: $this->failureMessage($exception, 'Товар не знайдено.'),
+                keyboard: $this->keyboard->backToCategory($categoryId, $context['callbackContext']),
             );
 
             return;
@@ -93,20 +115,92 @@ final class CatalogHandler
         $this->messageEditor->edit(
             bot: $bot,
             text: $this->formatter->product($product),
-            keyboard: $this->keyboard->product($categoryId, $productId),
+            keyboard: $this->keyboard->product($categoryId, $productId, $context['callbackContext']),
         );
     }
 
-    public function mainMenu(Nutgram $bot): void
+    public function mainMenu(Nutgram $bot, int $restaurantId, string $fingerprint): void
     {
         if (! $this->callbackAcknowledger->acknowledge($bot)) {
             return;
         }
 
+        $context = $this->validatedContext($bot, $restaurantId, $fingerprint);
+
+        if ($context === null) {
+            return;
+        }
+
         $this->messageEditor->edit(
             bot: $bot,
-            text: 'Приветствую! Выберите действие:',
-            keyboard: $this->mainMenu->make(),
+            text: 'Вітаємо! Оберіть дію:',
+            keyboard: $this->mainMenu->make($context['callbackContext']),
+        );
+    }
+
+    /**
+     * @return array{sessionToken: string, callbackContext: string, restaurantSlug: string}|null
+     */
+    private function restaurantContext(Nutgram $bot, int $restaurantId, string $fingerprint): ?array
+    {
+        $context = $this->validatedContext($bot, $restaurantId, $fingerprint);
+
+        if ($context === null) {
+            return null;
+        }
+
+        try {
+            $restaurants = $this->backend->currentSessionRestaurants($context['sessionToken']);
+        } catch (OrderingBackendException $exception) {
+            if ($this->sessionRecovery->recoverIfUnauthorized($bot, $exception)) {
+                return null;
+            }
+
+            $this->stale($bot, $restaurantId, $context['sessionToken']);
+
+            return null;
+        }
+
+        foreach ($restaurants as $restaurant) {
+            if ($restaurant['id'] === $restaurantId) {
+                return $context + ['restaurantSlug' => $restaurant['slug']];
+            }
+        }
+
+        $this->stale($bot, $restaurantId, $context['sessionToken']);
+
+        return null;
+    }
+
+    /**
+     * @return array{sessionToken: string, callbackContext: string}|null
+     */
+    private function validatedContext(Nutgram $bot, int $restaurantId, string $fingerprint): ?array
+    {
+        $sessionToken = $this->sessionRecovery->tokenOrRecover($bot);
+
+        if ($sessionToken === null) {
+            return null;
+        }
+
+        if (! $this->navigationContext->isValid($restaurantId, $fingerprint, $sessionToken)) {
+            $this->stale($bot, $restaurantId, $sessionToken);
+
+            return null;
+        }
+
+        return [
+            'sessionToken' => $sessionToken,
+            'callbackContext' => $this->navigationContext->encode($restaurantId, $sessionToken),
+        ];
+    }
+
+    private function stale(Nutgram $bot, int $restaurantId, string $sessionToken): void
+    {
+        $this->messageEditor->edit(
+            bot: $bot,
+            text: RestaurantNavigationContext::STALE_MESSAGE,
+            keyboard: $this->mainMenu->make($this->navigationContext->encode($restaurantId, $sessionToken)),
         );
     }
 
@@ -116,6 +210,6 @@ final class CatalogHandler
             return $notFoundMessage;
         }
 
-        return 'Сервис каталога временно недоступен. Попробуйте снова позже.';
+        return 'Сервіс каталогу тимчасово недоступний. Спробуйте пізніше.';
     }
 }

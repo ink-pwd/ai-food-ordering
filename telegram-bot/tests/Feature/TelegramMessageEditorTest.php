@@ -25,7 +25,7 @@ test('an unchanged Telegram message edit is a successful no-op without a fallbac
 
     (new TelegramMessageEditor($logger))->edit(
         bot: $bot,
-        text: 'Без изменений',
+        text: 'Без змін',
         keyboard: telegramMessageEditorKeyboard(),
     );
 
@@ -41,7 +41,7 @@ test('an unexpected Telegram message edit exception still propagates', function 
 
     expect(fn () => (new TelegramMessageEditor($logger))->edit(
         bot: $bot,
-        text: 'Сообщение',
+        text: 'Повідомлення',
         keyboard: telegramMessageEditorKeyboard(),
     ))->toThrow(TelegramException::class, 'Bad Request: chat not found');
 
@@ -57,7 +57,7 @@ test('a normal Telegram message edit is sent unchanged', function () {
 
     (new TelegramMessageEditor($logger))->edit(
         bot: $bot,
-        text: 'Обновлённое сообщение',
+        text: 'Оновлене повідомлення',
         keyboard: telegramMessageEditorKeyboard(),
     );
 
@@ -67,10 +67,10 @@ test('a normal Telegram message edit is sent unchanged', function () {
         ->assertRaw(function (TelegramRequest $request): bool {
             $payload = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
 
-            expect($payload['text'])->toBe('Обновлённое сообщение')
+            expect($payload['text'])->toBe('Оновлене повідомлення')
                 ->and($payload['reply_markup']['inline_keyboard'][0][0])->toMatchArray([
-                    'text' => '⬅️ Главное меню',
-                    'callback_data' => 'main_menu',
+                    'text' => '⬅️ Головне меню',
+                    'callback_data' => 'main_menu:10:abcdef123456',
                 ]);
 
             return true;
@@ -96,7 +96,7 @@ function telegramMessageEditorKeyboard(): InlineKeyboardMarkup
 {
     return InlineKeyboardMarkup::make()
         ->addRow(InlineKeyboardButton::make(
-            text: '⬅️ Главное меню',
-            callback_data: 'main_menu',
+            text: '⬅️ Головне меню',
+            callback_data: 'main_menu:10:abcdef123456',
         ));
 }

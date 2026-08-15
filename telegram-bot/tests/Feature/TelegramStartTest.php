@@ -18,7 +18,7 @@ beforeEach(function () {
     Http::preventStrayRequests();
 });
 
-test('/start creates a backend session and requests contact before showing the main menu', function () {
+test('/start creates a backend session and requests contact in Ukrainian', function () {
     $sessionToken = str_repeat('c', 64);
 
     Http::fake([
@@ -29,33 +29,22 @@ test('/start creates a backend session and requests contact before showing the m
         ], 201),
     ]);
 
-    /** @var FakeNutgram $bot */
-    $bot = app(Nutgram::class);
-    $bot->setCommonChat(Chat::make(id: 123456, type: ChatType::PRIVATE))
-        ->setCommonUser(User::make(id: 654321, is_bot: false, first_name: 'Test'))
+    telegramStartBot()
         ->hearText('/start')
         ->reply()
         ->assertReplyMessage([
-            'text' => 'Чтобы продолжить, поделитесь своим контактом.',
-            'reply_markup' => [
-                'keyboard' => [
-                    [[
-                        'text' => '📱 Поделиться контактом',
-                        'request_contact' => true,
-                    ]],
-                ],
-                'resize_keyboard' => true,
-                'one_time_keyboard' => true,
-            ],
+            'text' => 'Щоб продовжити, надішліть свій номер телефону.',
+            'reply_markup' => startContactRequestKeyboard(),
         ])
         ->assertRaw(function (TelegramRequest $request) use ($sessionToken): bool {
             $telegramOutput = (string) $request->getBody();
 
             expect($telegramOutput)
+                ->toContain('📱 Надіслати номер телефону')
                 ->not->toContain($sessionToken)
                 ->not->toContain('internal-api-secret')
                 ->not->toContain('🍕 Каталог')
-                ->not->toContain('🛒 Корзина');
+                ->not->toContain('🛒 Кошик');
 
             return true;
         });
@@ -69,3 +58,28 @@ test('/start creates a backend session and requests contact before showing the m
         ]);
     Http::assertSentCount(1);
 });
+
+function telegramStartBot(): FakeNutgram
+{
+    /** @var FakeNutgram $bot */
+    $bot = app(Nutgram::class);
+
+    return $bot
+        ->setCommonChat(Chat::make(id: 123456, type: ChatType::PRIVATE))
+        ->setCommonUser(User::make(id: 654321, is_bot: false, first_name: 'Test'));
+}
+
+/** @return array{keyboard: array<int, array<int, array{text: string, request_contact: bool}>>, resize_keyboard: bool, one_time_keyboard: bool} */
+function startContactRequestKeyboard(): array
+{
+    return [
+        'keyboard' => [
+            [[
+                'text' => '📱 Надіслати номер телефону',
+                'request_contact' => true,
+            ]],
+        ],
+        'resize_keyboard' => true,
+        'one_time_keyboard' => true,
+    ];
+}

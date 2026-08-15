@@ -38,7 +38,6 @@ return [
     'ordering_backend' => [
         'url' => env('BACKEND_URL'),
         'token' => env('BACKEND_INTERNAL_API_TOKEN'),
-        'restaurant_slug' => env('BACKEND_RESTAURANT_SLUG', 'papa-jon'),
         'timeout' => (int) env('BACKEND_TIMEOUT', 10),
     ],
 

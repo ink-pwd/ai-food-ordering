@@ -14,7 +14,7 @@ final class ContactRequestKeyboard
             one_time_keyboard: true,
         )->addRow(
             KeyboardButton::make(
-                text: '📱 Поделиться контактом',
+                text: '📱 Надіслати номер телефону',
                 request_contact: true,
             ),
         );

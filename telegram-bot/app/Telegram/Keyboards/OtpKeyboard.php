@@ -5,18 +5,18 @@ namespace App\Telegram\Keyboards;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
-final class CheckoutKeyboard
+final class OtpKeyboard
 {
-    public function confirmation(string $idempotencyKey, string $context): InlineKeyboardMarkup
+    public function make(): InlineKeyboardMarkup
     {
         return InlineKeyboardMarkup::make()
             ->addRow(InlineKeyboardButton::make(
-                text: '✅ Підтвердити',
-                callback_data: "oc:{$idempotencyKey}:{$context}",
+                text: '🔄 Надіслати код повторно',
+                callback_data: 'otp:resend',
             ))
             ->addRow(InlineKeyboardButton::make(
-                text: '❌ Скасувати',
-                callback_data: "order:cancel:{$context}",
+                text: '🚪 Вийти',
+                callback_data: 'exit',
             ));
     }
 }
