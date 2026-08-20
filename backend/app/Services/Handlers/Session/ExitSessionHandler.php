@@ -2,32 +2,35 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\SessionData;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\OtpChallengeRepository;
 use App\Services\Repositories\SessionRepository;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class ExitSessionHandler
+readonly class ExitSessionHandler
 {
     public function __construct(
-        private readonly CartRepository $carts,
-        private readonly SessionRepository $sessions,
-        private readonly OtpChallengeRepository $otps,
-    ) {}
+        private CartRepository $carts,
+        private SessionRepository $sessions,
+        private OtpChallengeRepository $otps,
+    ) {
+    }
 
-    /** @param array<string, mixed> $session */
-    public function handle(string $plainToken, array $session): array
-    {
-        $restaurantId = $session['restaurant_id'] ?? null;
+    public function handle(
+        string $plainToken,
+        SessionData $session,
+    ): SessionData {
+        $restaurantId = $session->restaurantId;
 
         if (is_int($restaurantId) && $restaurantId > 0) {
             $this->carts->abandonActiveForSession(
                 $restaurantId,
-                $session['id'],
+                $session->id,
             );
         }
 
-        $this->otps->forget($session['id']);
+        $this->otps->forget($session->id);
 
         $closedSession = $this->sessions->close($plainToken);
 
@@ -35,6 +38,6 @@ class ExitSessionHandler
             throw new NotFoundHttpException;
         }
 
-        return $closedSession;
+        return SessionData::fromArray($closedSession);
     }
 }

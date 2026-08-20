@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class MutateCartRequest extends FormRequest
@@ -11,6 +12,7 @@ class MutateCartRequest extends FormRequest
         return true;
     }
 
+    /** @return array<string, array<int, string>> */
     public function rules(): array
     {
         return [
@@ -29,11 +31,11 @@ class MutateCartRequest extends FormRequest
         ];
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 }

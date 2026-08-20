@@ -2,29 +2,34 @@
 
 namespace App\Services\Handlers\Cart;
 
-use App\Enums\CartStatus;
+use App\DTO\SessionData;
 use App\Models\Cart;
+use App\Models\Restaurant;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\ProductRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Resolvers\Cart\ActiveCartForUpdateResolver;
+use App\Services\Resolvers\Cart\CartItemForUpdateResolver;
 use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class UpdateCartItemHandler
+readonly class UpdateCartItemHandler
 {
     public function __construct(
-        private readonly RestaurantRepository $restaurants,
-        private readonly CartRepository $carts,
-        private readonly ProductRepository $products,
-    ) {}
+        private RestaurantRepository $restaurants,
+        private CartRepository $carts,
+        private ProductRepository $products,
+        private ActiveCartForUpdateResolver $activeCartForUpdateResolver,
+        private CartItemForUpdateResolver $cartItemForUpdateResolver,
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
+     * @throws \Throwable
      */
     public function handle(
-        array $session,
+        SessionData $session,
         int $itemId,
         int $quantity,
     ): Cart {
@@ -36,72 +41,67 @@ class UpdateCartItemHandler
             throw new NotFoundHttpException;
         }
 
-        return DB::transaction(function () use (
-            $restaurant,
-            $session,
-            $itemId,
-            $quantity,
-        ): Cart {
-            $cart = $this->carts->findForSessionForUpdate(
+        // The cart/item rows are locked below; item update and total recalculation must commit atomically.
+        return DB::transaction(
+            fn (): Cart => $this->updateItemAndRecalculateTotals(
                 $restaurant,
-                $session['id'],
-            );
-
-            if ($cart === null) {
-                throw new NotFoundHttpException('Cart not found.');
-            }
-
-            if (
-                $cart->status !== CartStatus::Active
-                || $cart->expires_at->lessThanOrEqualTo(now())
-            ) {
-                throw new ConflictHttpException('Cart is not active.');
-            }
-
-            $item = $this->carts->findItemForCartForUpdate(
-                $cart,
+                $session,
                 $itemId,
-            );
-
-            if ($item === null) {
-                throw new NotFoundHttpException('Cart item not found.');
-            }
-
-            $product = $this->products->findForRestaurantById(
-                $restaurant,
-                $item->product_id,
-            );
-
-            if ($product === null || ! $product->is_available) {
-                throw new NotFoundHttpException('Product not found.');
-            }
-
-            $unitPrice = $product->promotion_price ?? $product->price;
-
-            $lineTotal = $this->multiplyMoney(
-                $unitPrice,
                 $quantity,
-            );
+            ),
+        );
+    }
 
-            $this->carts->updateItem(
-                $item,
-                $quantity,
-                $unitPrice,
-                $lineTotal,
-            );
+    private function updateItemAndRecalculateTotals(
+        Restaurant $restaurant,
+        SessionData $session,
+        int $itemId,
+        int $quantity,
+    ): Cart {
+        $cart = $this->activeCartForUpdateResolver->resolve(
+            $restaurant,
+            $session->id,
+        );
 
-            $subtotal = $this->sumMoney(
-                $this->carts->itemTotals($cart),
-            );
+        $item = $this->cartItemForUpdateResolver->resolve(
+            $cart,
+            $itemId,
+        );
 
-            $this->carts->updateTotals(
-                $cart,
-                $subtotal,
-                $subtotal,
-            );
+        $product = $this->products->findForRestaurantById(
+            $restaurant,
+            $item->product_id,
+        );
 
-            return $this->carts->refreshWithItems($cart);
-        });
+        if ($product === null || ! $product->is_available) {
+            throw new NotFoundHttpException('Product not found.');
+        }
+
+        $unitPrice = $product->promotion_price ?? $product->price;
+
+        $lineTotal = $this->multiplyMoney(
+            $unitPrice,
+            $quantity,
+        );
+
+        $this->carts->updateItem(
+            $item,
+            $quantity,
+            $unitPrice,
+            $lineTotal,
+        );
+
+        $subtotal = $this->sumMoney(
+            $this->carts->itemTotals($cart),
+        );
+
+        $this->carts->updateTotals(
+            $cart,
+            $subtotal,
+            $subtotal,
+        );
+
+        return $this->carts->refreshWithItems($cart);
     }
 
     private function multiplyMoney(

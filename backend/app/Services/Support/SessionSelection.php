@@ -2,71 +2,87 @@
 
 namespace App\Services\Support;
 
+use App\DTO\SessionData;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class SessionSelection
 {
-    /** @param array<string, mixed> $session */
-    public static function cityId(array $session): int
+    public static function cityId(SessionData $session): int
     {
-        $cityId = $session['city_id'] ?? null;
+        $cityId = $session->cityId;
 
         if (! is_int($cityId) || $cityId < 1) {
-            throw new ConflictHttpException('City must be selected.');
+            throw new ConflictHttpException(
+                'City must be selected.',
+            );
         }
 
         return $cityId;
     }
 
-    /** @param array<string, mixed> $session */
-    public static function restaurantId(array $session): int
+    public static function restaurantId(SessionData $session): int
     {
-        $restaurantId = $session['restaurant_id'] ?? null;
+        $restaurantId = $session->restaurantId;
 
         if (! is_int($restaurantId) || $restaurantId < 1) {
-            throw new ConflictHttpException('Restaurant must be selected.');
+            throw new ConflictHttpException(
+                'Restaurant must be selected.',
+            );
         }
 
         return $restaurantId;
     }
 
-    /** @param array<string, mixed> $session */
-    public static function assertContactExists(array $session): void
-    {
+    public static function assertContactExists(
+        SessionData $session,
+    ): void {
         $contact = self::contact($session);
 
         if ($contact === null) {
-            throw new ConflictHttpException('Contact information is required.');
+            throw new ConflictHttpException(
+                'Contact information is required.',
+            );
         }
     }
 
-    /** @param array<string, mixed> $session */
-    public static function assertPhoneVerified(array $session): void
-    {
+    public static function assertPhoneVerified(
+        SessionData $session,
+    ): void {
         $contact = self::contact($session);
 
-        if ($contact === null || ($contact['phone_verified'] ?? null) !== true) {
-            throw new ConflictHttpException('Phone verification is required.');
+        if (
+            $contact === null
+            || ($contact['phone_verified'] ?? null) !== true
+        ) {
+            throw new ConflictHttpException(
+                'Phone verification is required.',
+            );
         }
     }
 
     /**
-     * @param  array<string, mixed>  $session
      * @return array{name: string, phone: string, phone_verified?: bool}|null
      */
-    public static function contact(array $session): ?array
-    {
-        $contact = $session['metadata']['contact'] ?? null;
+    public static function contact(
+        SessionData $session,
+    ): ?array {
+        $contact = $session->metadata['contact'] ?? null;
 
-        if (! is_array($contact)
-            || ! is_string($contact['name'] ?? null)
-            || trim($contact['name']) === ''
-            || ! is_string($contact['phone'] ?? null)
-            || trim($contact['phone']) === ''
-        ) {
+        if (self::isInvalidContact($contact)) {
             return null;
         }
 
+        /** @var array{name: string, phone: string, phone_verified?: bool} $contact */
         return $contact;
+    }
+
+    private static function isInvalidContact(
+        mixed $contact,
+    ): bool {
+        return ! is_array($contact)
+            || ! is_string($contact['name'] ?? null)
+            || trim($contact['name']) === ''
+            || ! is_string($contact['phone'] ?? null)
+            || trim($contact['phone']) === '';
     }
 }

@@ -6,12 +6,13 @@ use App\Models\Order;
 use Illuminate\Contracts\Support\Responsable;
 use Symfony\Component\HttpFoundation\Response;
 
-class OrderResponse implements Responsable
+readonly class OrderResponse implements Responsable
 {
     public function __construct(
-        private readonly Order $order,
-        private readonly bool $created = false,
-    ) {}
+        private Order $order,
+        private bool $created = false,
+    ) {
+    }
 
     public function toResponse($request): Response
     {

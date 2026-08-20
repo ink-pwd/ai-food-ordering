@@ -10,8 +10,10 @@ use Illuminate\Http\JsonResponse;
 
 class SessionCityController extends Controller
 {
-    public function __invoke(SelectSessionCityRequest $request, SelectSessionCityHandler $selectCity): JsonResponse
-    {
+    public function __invoke(
+        SelectSessionCityRequest $request,
+        SelectSessionCityHandler $selectCity,
+    ): JsonResponse {
         $result = $selectCity->handle(
             $request->sessionToken(),
             $request->internalSession(),
@@ -20,7 +22,7 @@ class SessionCityController extends Controller
 
         return response()->json([
             'data' => [
-                'session_id' => $result['session']['id'],
+                'session_id' => $result['session']->id,
                 'city' => (new CityResource($result['city']))->resolve($request),
             ],
         ]);

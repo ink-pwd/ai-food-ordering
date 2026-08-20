@@ -32,7 +32,10 @@ class CatalogSyncLogRepository
             'error_message' => null,
         ])->save();
 
-        return $log->fresh();
+        /** @var CatalogSyncLog $freshLog */
+        $freshLog = $log->fresh();
+
+        return $freshLog;
     }
 
     public function markFailed(CatalogSyncLog $log, string $safeErrorMessage): CatalogSyncLog
@@ -44,6 +47,17 @@ class CatalogSyncLogRepository
             'error_message' => $safeErrorMessage,
         ])->save();
 
-        return $log->fresh();
+        /** @var CatalogSyncLog $freshLog */
+        $freshLog = $log->fresh();
+
+        return $freshLog;
+    }
+
+    public function refresh(CatalogSyncLog $log): CatalogSyncLog
+    {
+        /** @var CatalogSyncLog $freshLog */
+        $freshLog = $log->fresh();
+
+        return $freshLog;
     }
 }

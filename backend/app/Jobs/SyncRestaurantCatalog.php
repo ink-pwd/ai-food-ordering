@@ -26,8 +26,11 @@ class SyncRestaurantCatalog implements ShouldBeUnique, ShouldQueue
     {
         $this->onConnection('rabbitmq');
 
+        /** @var string $queue */
+        $queue = config('queue.queues.catalog_sync');
+
         $this->onQueue(
-            (string) config('queue.queues.catalog_sync'),
+            (string) $queue,
         );
     }
 

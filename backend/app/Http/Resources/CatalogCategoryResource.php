@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Category;
 use Illuminate\Http\Request;
 
 class CatalogCategoryResource extends CategoryResource
@@ -13,9 +14,12 @@ class CatalogCategoryResource extends CategoryResource
      */
     public function toArray(Request $request): array
     {
+        /** @var Category $category */
+        $category = $this->resource;
+
         return [
             ...parent::toArray($request),
-            'products' => ProductResource::collection($this->resource->getRelation('products')),
+            'products' => ProductResource::collection($category->getRelation('products')),
         ];
     }
 }

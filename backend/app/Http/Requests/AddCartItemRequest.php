@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AddCartItemRequest extends FormRequest
@@ -11,6 +12,7 @@ class AddCartItemRequest extends FormRequest
         return true;
     }
 
+    /** @return array<string, array<int, string>> */
     public function rules(): array
     {
         return [
@@ -30,21 +32,27 @@ class AddCartItemRequest extends FormRequest
         ];
     }
 
-    /**
-     * @return array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}
-     */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 
     public function productId(): int
     {
-        return (int) $this->validated('product_id');
+        /** @var int|string $productId */
+        $productId = $this->validated('product_id');
+
+        return (int) $productId;
     }
 
     public function quantity(): int
     {
-        return (int) $this->validated('quantity');
+        /** @var int|string $quantity */
+        $quantity = $this->validated('quantity');
+
+        return (int) $quantity;
     }
 }

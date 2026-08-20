@@ -51,11 +51,14 @@ class CreateRestaurantCommand extends Command
             return Command::FAILURE;
         }
 
+        /** @var string $currency */
+        $currency = $data['currency'];
+
         $restaurant = Restaurant::query()->create([
             'external_company_id' => $data['external_company_id'],
             'name' => $data['name'],
             'slug' => $data['slug'],
-            'currency' => strtoupper($data['currency']),
+            'currency' => strtoupper($currency),
             'locale' => $data['locale'],
             'timezone' => $data['timezone'],
             'is_active' => ! $this->option('inactive'),

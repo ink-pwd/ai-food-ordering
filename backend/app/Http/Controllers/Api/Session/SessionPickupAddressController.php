@@ -9,8 +9,10 @@ use Illuminate\Http\JsonResponse;
 
 class SessionPickupAddressController extends Controller
 {
-    public function __invoke(SelectPickupAddressRequest $request, SelectPickupAddressHandler $selectAddress): JsonResponse
-    {
+    public function __invoke(
+        SelectPickupAddressRequest $request,
+        SelectPickupAddressHandler $selectAddress,
+    ): JsonResponse {
         $session = $selectAddress->handle(
             $request->sessionToken(),
             $request->internalSession(),
@@ -19,8 +21,8 @@ class SessionPickupAddressController extends Controller
 
         return response()->json([
             'data' => [
-                'session_id' => $session['id'],
-                'fulfillment' => $session['fulfillment'],
+                'session_id' => $session->id,
+                'fulfillment' => $session->fulfillment,
             ],
         ]);
     }

@@ -9,8 +9,10 @@ use Illuminate\Http\JsonResponse;
 
 class SessionExitController extends Controller
 {
-    public function __invoke(CurrentSessionRequest $request, ExitSessionHandler $exitSession): JsonResponse
-    {
+    public function __invoke(
+        CurrentSessionRequest $request,
+        ExitSessionHandler $exitSession,
+    ): JsonResponse {
         $session = $exitSession->handle(
             $request->sessionToken(),
             $request->internalSession(),
@@ -18,8 +20,8 @@ class SessionExitController extends Controller
 
         return response()->json([
             'data' => [
-                'session_id' => $session['id'],
-                'status' => $session['status'],
+                'session_id' => $session->id,
+                'status' => $session->status,
             ],
         ]);
     }

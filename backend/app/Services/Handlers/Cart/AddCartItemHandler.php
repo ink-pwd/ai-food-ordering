@@ -2,92 +2,113 @@
 
 namespace App\Services\Handlers\Cart;
 
-use App\Enums\CartStatus;
+use App\DTO\SessionData;
 use App\Models\Cart;
+use App\Models\Restaurant;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\ProductRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Resolvers\Cart\ActiveCartForUpdateResolver;
 use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class AddCartItemHandler
+readonly class AddCartItemHandler
 {
     public function __construct(
         private readonly RestaurantRepository $restaurants,
         private readonly CartRepository $carts,
         private readonly ProductRepository $products,
-    ) {}
+        private readonly ActiveCartForUpdateResolver $activeCartForUpdateResolver,
+    ) {
+    }
 
     /**
-     * @param  array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}  $session
+     * @throws \Throwable
      */
-    public function handle(array $session, int $productId, int $quantity): Cart
-    {
-        $restaurant = $this->restaurants->findActiveById(SessionSelection::restaurantId($session));
+    public function handle(
+        SessionData $session,
+        int $productId,
+        int $quantity,
+    ): Cart {
+        $restaurant = $this->restaurants->findActiveById(
+            SessionSelection::restaurantId($session),
+        );
 
         if ($restaurant === null) {
             throw new NotFoundHttpException;
         }
 
-        return DB::transaction(function () use ($restaurant, $session, $productId, $quantity): Cart {
-            $cart = $this->carts->findForSessionForUpdate(
+        // The cart row is locked below; item creation and total recalculation must commit atomically.
+        return DB::transaction(
+            fn (): Cart => $this->addItemAndRecalculateTotals(
                 $restaurant,
-                $session['id'],
-            );
-
-            if ($cart === null) {
-                throw new NotFoundHttpException('Cart not found.');
-            }
-
-            if (
-                $cart->status !== CartStatus::Active
-                || $cart->expires_at->lessThanOrEqualTo(now())
-            ) {
-                throw new ConflictHttpException('Cart is not active.');
-            }
-
-            $product = $this->products->findForRestaurantById(
-                $restaurant,
+                $session,
                 $productId,
-            );
-
-            if ($product === null || ! $product->is_available) {
-                throw new NotFoundHttpException('Product not found.');
-            }
-
-            $unitPrice = $product->promotion_price ?? $product->price;
-            $lineTotal = $this->multiplyMoney($unitPrice, $quantity);
-
-            $result = $this->carts->createItem(
-                $cart,
-                $product,
                 $quantity,
-                $unitPrice,
-                $lineTotal,
-            );
-
-            if (! $result['created']) {
-                throw new ConflictHttpException('Product already exists in cart.');
-            }
-
-            $subtotal = $this->sumMoney(
-                $this->carts->itemTotals($cart),
-            );
-
-            $this->carts->updateTotals(
-                $cart,
-                $subtotal,
-                $subtotal,
-            );
-
-            return $this->carts->refreshWithItems($cart);
-        });
+            ),
+        );
     }
 
-    private function multiplyMoney(string $amount, int $quantity): string
-    {
+    private function addItemAndRecalculateTotals(
+        Restaurant $restaurant,
+        SessionData $session,
+        int $productId,
+        int $quantity,
+    ): Cart {
+        $cart = $this->activeCartForUpdateResolver->resolve(
+            $restaurant,
+            $session->id,
+        );
+
+        $product = $this->products->findForRestaurantById(
+            $restaurant,
+            $productId,
+        );
+
+        if ($product === null || ! $product->is_available) {
+            throw new NotFoundHttpException('Product not found.');
+        }
+
+        $unitPrice = $product->promotion_price ?? $product->price;
+
+        $lineTotal = $this->multiplyMoney(
+            $unitPrice,
+            $quantity,
+        );
+
+        $result = $this->carts->createItem(
+            $cart,
+            $product,
+            $quantity,
+            $unitPrice,
+            $lineTotal,
+        );
+
+        if (! $result['created']) {
+            throw new ConflictHttpException(
+                'Product already exists in cart.',
+            );
+        }
+
+        $subtotal = $this->sumMoney(
+            $this->carts->itemTotals($cart),
+        );
+
+        $this->carts->updateTotals(
+            $cart,
+            $subtotal,
+            $subtotal,
+        );
+
+        return $this->carts->refreshWithItems($cart);
+    }
+
+    private function multiplyMoney(
+        string $amount,
+        int $quantity,
+    ): string {
         return $this->fromCents(
             $this->toCents($amount) * $quantity,
         );
@@ -109,9 +130,17 @@ class AddCartItemHandler
 
     private function toCents(string $amount): int
     {
-        [$whole, $fraction] = array_pad(explode('.', $amount, 2), 2, '0');
+        [$whole, $fraction] = array_pad(
+            explode('.', $amount, 2),
+            2,
+            '0',
+        );
 
-        $fraction = str_pad(substr($fraction, 0, 2), 2, '0');
+        $fraction = str_pad(
+            substr($fraction, 0, 2),
+            2,
+            '0',
+        );
 
         return ((int) $whole * 100) + (int) $fraction;
     }

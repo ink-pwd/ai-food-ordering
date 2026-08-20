@@ -2,6 +2,7 @@
 
 namespace App\Telegram\Keyboards;
 
+use App\DTO\OrderingBackend\ProductSummaryData;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
@@ -28,18 +29,18 @@ final class CatalogKeyboard
     }
 
     /**
-     * @param  list<array{id: int, name: string, price: string, promotion_price: ?string, currency: string}>  $products
+     * @param  list<ProductSummaryData>  $products
      */
     public function products(int $categoryId, array $products, string $context): InlineKeyboardMarkup
     {
         $keyboard = InlineKeyboardMarkup::make();
 
         foreach ($products as $product) {
-            $displayPrice = $product['promotion_price'] ?? $product['price'];
+            $displayPrice = $product->promotionPrice ?? $product->price;
 
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: "🍽 {$product['name']} — {$displayPrice} {$product['currency']}",
-                callback_data: "product:{$categoryId}:{$product['id']}:{$context}",
+                text: "🍽 {$product->name} — {$displayPrice} {$product->currency}",
+                callback_data: "product:{$categoryId}:{$product->id}:{$context}",
             ));
         }
 

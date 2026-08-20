@@ -9,7 +9,8 @@ final class ContactOnboarding
 {
     public function __construct(
         private readonly ContactRequestKeyboard $contactRequest,
-    ) {}
+    ) {
+    }
 
     public function start(Nutgram $bot): void
     {

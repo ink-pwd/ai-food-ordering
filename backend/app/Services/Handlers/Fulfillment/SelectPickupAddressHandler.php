@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Fulfillment;
 
+use App\DTO\SessionData;
 use App\Enums\FulfillmentType;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\CityRepository;
@@ -23,20 +24,20 @@ class SelectPickupAddressHandler
         private readonly RestaurantAddressRepository $addresses,
         private readonly CartRepository $carts,
         private readonly SessionRepository $sessions,
-    ) {}
+    ) {
+    }
 
-    /**
-     * @param  array<string, mixed>  $session
-     * @return array<string, mixed>
-     */
-    public function handle(string $plainToken, array $session, int $addressId): array
-    {
+    public function handle(
+        string $plainToken,
+        SessionData $session,
+        int $addressId,
+    ): SessionData {
         SessionSelection::assertPhoneVerified($session);
         $city = $this->resolveCity($session, $this->cities);
         $restaurant = $this->resolveRestaurant($session, $city, $this->restaurants);
-        FulfillmentSelection::assertMutable($this->carts, $restaurant, $session['id']);
+        FulfillmentSelection::assertMutable($this->carts, $restaurant, $session->id);
 
-        if (($session['fulfillment']['type'] ?? null) !== FulfillmentType::Pickup->value) {
+        if (($session->fulfillment['type'] ?? null) !== FulfillmentType::Pickup->value) {
             throw new ConflictHttpException('Pickup fulfillment must be selected.');
         }
 
@@ -46,7 +47,7 @@ class SelectPickupAddressHandler
             throw new NotFoundHttpException('Pickup address not found.');
         }
 
-        $fulfillment = array_merge($session['fulfillment'], [
+        $fulfillment = array_merge($session->fulfillment, [
             'restaurant_address_id' => $address->id,
             'external_address_id' => $address->external_address_id,
             'dots_delivery_type' => null,
@@ -60,6 +61,6 @@ class SelectPickupAddressHandler
             throw new NotFoundHttpException;
         }
 
-        return $updatedSession;
+        return SessionData::fromArray($updatedSession);
     }
 }

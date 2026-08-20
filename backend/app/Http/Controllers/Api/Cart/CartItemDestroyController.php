@@ -11,12 +11,12 @@ class CartItemDestroyController extends Controller
 {
     public function __invoke(
         MutateCartRequest $request,
-        RemoveCartItemHandler $handler,
-        int $item,
+        RemoveCartItemHandler $removeCartItemHandler,
+        int $itemId,
     ): CartResponse {
-        $cart = $handler->handle(
+        $cart = $removeCartItemHandler->handle(
             $request->internalSession(),
-            $item,
+            $itemId,
         );
 
         return new CartResponse($cart);

@@ -3,332 +3,343 @@
 namespace App\Services\Orchestrators;
 
 use App\Integrations\Dots\DiscoveryApi;
-use App\Jobs\SyncRestaurantCatalog;
 use App\Models\City;
-use App\Services\Repositories\CityRepository;
-use App\Services\Repositories\RestaurantAddressRepository;
-use App\Services\Repositories\RestaurantRepository;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
+use App\Services\Handlers\Synchronization\CompleteDotsDiscoveryListHandler;
+use App\Services\Handlers\Synchronization\DeactivateMissingDotsTopologyHandler;
+use App\Services\Handlers\Synchronization\DeactivateMissingRestaurantsForCityHandler;
+use App\Services\Handlers\Synchronization\DispatchRestaurantCatalogSyncJobsHandler;
+use App\Services\Handlers\Synchronization\SynchronizeDotsCityHandler;
+use App\Services\Handlers\Synchronization\SynchronizeDotsCompanyHandler;
+use App\Services\Handlers\Synchronization\ValidateDotsTopologyPayloadHandler;
 
-class DotsTopologySynchronizationOrchestrator
+readonly class DotsTopologySynchronizationOrchestrator
 {
     public function __construct(
-        private readonly DiscoveryApi $discoveryApi,
-        private readonly CityRepository $cities,
-        private readonly RestaurantRepository $restaurants,
-        private readonly RestaurantAddressRepository $addresses,
-    ) {}
+        private DiscoveryApi $discoveryApi,
+        private CompleteDotsDiscoveryListHandler $completeList,
+        private ValidateDotsTopologyPayloadHandler $validator,
+        private SynchronizeDotsCityHandler $synchronizeCity,
+        private SynchronizeDotsCompanyHandler $synchronizeCompany,
+        private DeactivateMissingRestaurantsForCityHandler $deactivateMissingRestaurants,
+        private DeactivateMissingDotsTopologyHandler $deactivateMissingTopology,
+        private DispatchRestaurantCatalogSyncJobsHandler $dispatchCatalogJobs,
+    ) {
+    }
 
     /**
-     * @return array{cities: array<string, int>, restaurants: array<string, int>, addresses: array<string, int>, catalog_jobs: int}
+     * @return array{
+     *     cities: array<string, int>,
+     *     restaurants: array<string, int>,
+     *     addresses: array<string, int>,
+     *     catalog_jobs: int
+     * }
      */
     public function sync(): array
     {
-        $citiesResponse = $this->discoveryApi->refreshActiveCities();
-        $cityItems = $this->completeList($citiesResponse, 'cities');
-        $this->validateCities($cityItems);
+        $citiesResponse =
+            $this->discoveryApi
+                ->refreshActiveCities();
 
-        $result = [
-            'cities' => ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'deactivated' => 0],
-            'restaurants' => ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'deactivated' => 0],
-            'addresses' => ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'deactivated' => 0],
-            'catalog_jobs' => 0,
-        ];
+        $cityItems =
+            $this->completeList->handle(
+                $citiesResponse,
+                'cities',
+            );
+
+        $this->validator->handle(
+            ValidateDotsTopologyPayloadHandler::CITIES,
+            $cityItems,
+        );
+
+        $result = $this->emptyResult();
+
+        /** @var array<int, string> $presentCityIds */
         $presentCityIds = [];
 
         foreach ($cityItems as $cityItem) {
-            if (! $this->isActiveDotsEntity($cityItem)) {
+            if (
+                ! $this->isActiveDotsEntity(
+                    $cityItem,
+                )
+            ) {
                 continue;
             }
 
-            $cityDetails = $this->discoveryApi->getCity($cityItem['id']);
-            $this->validateCityDetails($cityDetails);
-            $cityData = array_replace_recursive($cityItem, $cityDetails);
+            /** @var string $cityId */
+            $cityId = $cityItem['id'];
 
-            $city = DB::transaction(function () use ($cityData, &$result): City {
-                $persistence = $this->cities->upsertFromDots(
-                    $cityData['id'],
-                    $this->cityAttributes($cityData),
+            $cityDetails =
+                $this->discoveryApi->getCity(
+                    $cityId,
                 );
 
-                $result['cities'][$persistence['state']]++;
+            $this->validator->handle(
+                ValidateDotsTopologyPayloadHandler::CITY_DETAILS,
+                $cityDetails,
+            );
 
-                return $persistence['city'];
-            });
+            $cityData =
+                array_replace_recursive(
+                    $cityItem,
+                    $cityDetails,
+                );
 
-            $presentCityIds[] = $cityData['id'];
+            $cityPersistence =
+                $this->synchronizeCity->handle(
+                    $cityData,
+                );
 
-            $companiesResponse = $this->discoveryApi->refreshCityCompanies($cityData['id']);
-            $companyItems = $this->completeList($companiesResponse, 'companies');
-            $this->validateCompanies($companyItems);
+            $city =
+                $cityPersistence['city'];
 
-            $presentCompanyIds = [];
+            $result['cities'][
+            $cityPersistence['state']
+            ]++;
 
-            foreach ($companyItems as $companyItem) {
-                if (! $this->isActiveDotsEntity($companyItem)) {
-                    continue;
-                }
+            /** @var string $resolvedCityId */
+            $resolvedCityId =
+                $cityData['id'];
 
-                $companyDetails = $this->discoveryApi->getCompany($companyItem['id']);
-                $this->validateCompanyDetails($companyDetails);
-                $companyData = array_replace_recursive($companyItem, $companyDetails);
+            $presentCityIds[] =
+                $resolvedCityId;
 
-                DB::transaction(function () use ($city, $cityData, $companyData, &$result): void {
-                    $restaurantPersistence = $this->restaurants->upsertFromDots(
-                        $city,
-                        $companyData['id'],
-                        $this->restaurantAttributes($cityData, $companyData),
+            $companiesResponse =
+                $this->discoveryApi
+                    ->refreshCityCompanies(
+                        $resolvedCityId,
                     );
-                    $restaurant = $restaurantPersistence['restaurant'];
 
-                    $result['restaurants'][$restaurantPersistence['state']]++;
+            $companyItems =
+                $this->completeList->handle(
+                    $companiesResponse,
+                    'companies',
+                );
 
-                    $addressItems = $companyData['addresses'] ?? [];
-                    $this->validateAddresses($addressItems);
-                    $presentAddressIds = [];
+            $this->validator->handle(
+                ValidateDotsTopologyPayloadHandler::COMPANIES,
+                $companyItems,
+            );
 
-                    foreach ($addressItems as $addressItem) {
-                        if (! $this->isActiveDotsEntity($addressItem + ['status' => 1])) {
-                            continue;
-                        }
-
-                        $addressPersistence = $this->addresses->upsertForRestaurant(
-                            $restaurant,
-                            $addressItem['id'],
-                            $this->addressAttributes($addressItem),
-                        );
-
-                        $presentAddressIds[] = $addressItem['id'];
-                        $result['addresses'][$addressPersistence['state']]++;
-                    }
-
-                    $result['addresses']['deactivated'] += $this->addresses->deactivateMissingForRestaurant(
-                        $restaurant,
-                        $presentAddressIds,
-                    );
-                });
-
-                $presentCompanyIds[] = $companyData['id'];
-            }
-
-            DB::transaction(function () use ($city, $presentCompanyIds, &$result): void {
-                $result['restaurants']['deactivated'] += $this->restaurants->deactivateMissingForCity(
+            $presentCompanyIds =
+                $this->synchronizeCompaniesForCity(
                     $city,
-                    $presentCompanyIds,
+                    $cityData,
+                    $companyItems,
+                    $result,
                 );
-            });
+
+            $result['restaurants'][
+            'deactivated'
+            ] +=
+                $this
+                    ->deactivateMissingRestaurants
+                    ->handle(
+                        $city,
+                        $presentCompanyIds,
+                    );
         }
 
-        DB::transaction(function () use ($presentCityIds, &$result): void {
-            $result['cities']['deactivated'] = $this->cities->deactivateMissing($presentCityIds);
-            $result['restaurants']['deactivated'] += $this->restaurants->deactivateRestaurantsForInactiveCities();
-            $result['addresses']['deactivated'] += $this->addresses->deactivateAddressesForInactiveRestaurants();
-        });
+        $deactivated =
+            $this->deactivateMissingTopology
+                ->handle(
+                    $presentCityIds,
+                );
 
-        foreach ($this->restaurants->activeSynchronized() as $restaurant) {
-            SyncRestaurantCatalog::dispatch($restaurant->id);
-            $result['catalog_jobs']++;
-        }
+        $result['cities']['deactivated'] =
+            $deactivated['cities'];
+
+        $result[
+        'restaurants'
+        ]['deactivated'] +=
+            $deactivated['restaurants'];
+
+        $result[
+        'addresses'
+        ]['deactivated'] +=
+            $deactivated['addresses'];
+
+        $result['catalog_jobs'] =
+            $this->dispatchCatalogJobs
+                ->handle();
 
         return $result;
     }
 
     /**
-     * @param  array<string, mixed>  $response
-     * @return array<int, array<string, mixed>>
+     * @param  array<string, mixed>  $cityData
+     * @param  array<int, array<string, mixed>>  $companyItems
+     * @param  array{
+     *     cities: array<string, int>,
+     *     restaurants: array<string, int>,
+     *     addresses: array<string, int>,
+     *     catalog_jobs: int
+     * }  $result
+     * @return array<int, string>
      */
-    private function completeList(array $response, string $field): array
-    {
-        if (($response['hasNext'] ?? false) !== false) {
-            throw ValidationException::withMessages([
-                'hasNext' => ['The Dots discovery response must be complete.'],
-            ]);
+    private function synchronizeCompaniesForCity(
+        City $city,
+        array $cityData,
+        array $companyItems,
+        array &$result,
+    ): array {
+        /** @var array<int, string> $presentCompanyIds */
+        $presentCompanyIds = [];
+
+        foreach ($companyItems as $companyItem) {
+            if (
+                ! $this->isActiveDotsEntity(
+                    $companyItem,
+                )
+            ) {
+                continue;
+            }
+
+            /** @var string $companyId */
+            $companyId =
+                $companyItem['id'];
+
+            $companyDetails =
+                $this->discoveryApi
+                    ->getCompany(
+                        $companyId,
+                    );
+
+            $this->validator->handle(
+                ValidateDotsTopologyPayloadHandler::COMPANY_DETAILS,
+                $companyDetails,
+            );
+
+            $companyData =
+                array_replace_recursive(
+                    $companyItem,
+                    $companyDetails,
+                );
+
+            $companyResult =
+                $this->synchronizeCompany
+                    ->handle(
+                        $city,
+                        $cityData,
+                        $companyData,
+                    );
+
+            $result['restaurants'][
+            $companyResult[
+            'restaurant_state'
+            ]
+            ]++;
+
+            $this->accumulateAddressResult(
+                $result,
+                $companyResult['addresses'],
+            );
+
+            /** @var string $resolvedCompanyId */
+            $resolvedCompanyId =
+                $companyData['id'];
+
+            $presentCompanyIds[] =
+                $resolvedCompanyId;
         }
 
-        if (array_is_list($response)) {
-            return $response;
+        return $presentCompanyIds;
+    }
+
+    /**
+     * @param  array{
+     *     cities: array<string, int>,
+     *     restaurants: array<string, int>,
+     *     addresses: array<string, int>,
+     *     catalog_jobs: int
+     * }  $result
+     * @param  array{
+     *     created: int,
+     *     updated: int,
+     *     unchanged: int,
+     *     deactivated: int
+     * }  $addressResult
+     */
+    private function accumulateAddressResult(
+        array &$result,
+        array $addressResult,
+    ): void {
+        foreach (
+            [
+                'created',
+                'updated',
+                'unchanged',
+                'deactivated',
+            ]
+            as $state
+        ) {
+            $result[
+            'addresses'
+            ][$state] +=
+                $addressResult[$state];
         }
-
-        $items = $response[$field] ?? $response['items'] ?? null;
-
-        if (! is_array($items) || ! array_is_list($items)) {
-            throw ValidationException::withMessages([
-                $field => ['The Dots discovery response must contain a list.'],
-            ]);
-        }
-
-        return $items;
-    }
-
-    /** @param array<string, mixed> $entity */
-    private function isActiveDotsEntity(array $entity): bool
-    {
-        return (int) ($entity['status'] ?? 0) === 1;
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $cities
+     * @return array{
+     *     cities: array{
+     *         created: int,
+     *         updated: int,
+     *         unchanged: int,
+     *         deactivated: int
+     *     },
+     *     restaurants: array{
+     *         created: int,
+     *         updated: int,
+     *         unchanged: int,
+     *         deactivated: int
+     *     },
+     *     addresses: array{
+     *         created: int,
+     *         updated: int,
+     *         unchanged: int,
+     *         deactivated: int
+     *     },
+     *     catalog_jobs: int
+     * }
      */
-    private function validateCities(array $cities): void
-    {
-        Validator::make(['cities' => $cities], [
-            'cities' => ['array', 'list'],
-            'cities.*' => ['required', 'array'],
-            'cities.*.id' => ['required', 'uuid', 'distinct'],
-            'cities.*.name' => ['required', 'string', 'max:255'],
-            'cities.*.url' => ['required', 'string', 'max:255'],
-            'cities.*.status' => ['required', 'integer'],
-            'cities.*.centerCoordinates' => ['nullable', 'array'],
-            'cities.*.centerCoordinates.latitude' => ['nullable', 'numeric'],
-            'cities.*.centerCoordinates.longitude' => ['nullable', 'numeric'],
-        ])->validate();
-    }
-
-    /** @param array<string, mixed> $city */
-    private function validateCityDetails(array $city): void
-    {
-        Validator::make($city, [
-            'id' => ['sometimes', 'uuid'],
-            'name' => ['sometimes', 'string', 'max:255'],
-            'url' => ['sometimes', 'string', 'max:255'],
-            'status' => ['sometimes', 'integer'],
-            'currency' => ['required', 'array'],
-            'currency.token' => ['required', 'string', 'size:3'],
-            'currency.formatted' => ['nullable', 'string', 'max:16'],
-            'timezone' => ['nullable', 'string', 'max:255'],
-            'centerCoordinates' => ['nullable', 'array'],
-            'centerCoordinates.latitude' => ['nullable', 'numeric'],
-            'centerCoordinates.longitude' => ['nullable', 'numeric'],
-        ])->validate();
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $companies
-     */
-    private function validateCompanies(array $companies): void
-    {
-        Validator::make(['companies' => $companies], [
-            'companies' => ['array', 'list'],
-            'companies.*' => ['required', 'array'],
-            'companies.*.id' => ['required', 'uuid', 'distinct'],
-            'companies.*.name' => ['required', 'string', 'max:255'],
-            'companies.*.url' => ['required', 'string', 'max:255'],
-            'companies.*.status' => ['required', 'integer'],
-            'companies.*.image' => ['nullable', 'string'],
-            'companies.*.availablePaymentTypes' => ['nullable', 'array', 'list'],
-            'companies.*.availablePaymentTypes.*' => ['required', 'array'],
-            'companies.*.availablePaymentTypes.*.type' => ['required', 'integer'],
-            'companies.*.availablePaymentTypes.*.title' => ['nullable', 'string', 'max:255'],
-            'companies.*.availableDeliveryTypes' => ['nullable', 'array'],
-            'companies.*.schedule' => ['nullable', 'array'],
-            'companies.*.deliveryTimeText' => ['nullable', 'string', 'max:255'],
-            'companies.*.deliveryPriceText' => ['nullable', 'string', 'max:255'],
-        ])->validate();
-    }
-
-    /** @param array<string, mixed> $company */
-    private function validateCompanyDetails(array $company): void
-    {
-        Validator::make($company, [
-            'id' => ['sometimes', 'uuid'],
-            'name' => ['sometimes', 'string', 'max:255'],
-            'url' => ['sometimes', 'string', 'max:255'],
-            'status' => ['sometimes', 'integer'],
-            'image' => ['nullable', 'string'],
-            'availablePaymentTypes' => ['nullable', 'array', 'list'],
-            'availablePaymentTypes.*' => ['required', 'array'],
-            'availablePaymentTypes.*.type' => ['required', 'integer'],
-            'availablePaymentTypes.*.title' => ['nullable', 'string', 'max:255'],
-            'availableDeliveryTypes' => ['nullable', 'array'],
-            'schedule' => ['nullable', 'array'],
-            'deliveryTimeText' => ['nullable', 'string', 'max:255'],
-            'deliveryPriceText' => ['nullable', 'string', 'max:255'],
-            'addresses' => ['nullable', 'array', 'list'],
-        ])->validate();
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $addresses
-     */
-    private function validateAddresses(array $addresses): void
-    {
-        Validator::make(['addresses' => $addresses], [
-            'addresses' => ['array', 'list'],
-            'addresses.*' => ['required', 'array'],
-            'addresses.*.id' => ['required', 'uuid', 'distinct'],
-            'addresses.*.title' => ['required', 'string', 'max:255'],
-            'addresses.*.status' => ['sometimes', 'integer'],
-            'addresses.*.location' => ['nullable', 'array'],
-            'addresses.*.location.latitude' => ['nullable', 'numeric'],
-            'addresses.*.location.longitude' => ['nullable', 'numeric'],
-            'addresses.*.polygon' => ['nullable', 'array'],
-        ])->validate();
-    }
-
-    /**
-     * @param  array<string, mixed>  $city
-     * @return array<string, mixed>
-     */
-    private function cityAttributes(array $city): array
+    private function emptyResult(): array
     {
         return [
-            'name' => $city['name'],
-            'slug' => $city['url'],
-            'is_active' => $this->isActiveDotsEntity($city),
-            'center_latitude' => Arr::get($city, 'centerCoordinates.latitude'),
-            'center_longitude' => Arr::get($city, 'centerCoordinates.longitude'),
-            'currency' => strtoupper($city['currency']['token']),
-            'timezone' => $city['timezone'] ?? null,
+            'cities' => [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+                'deactivated' => 0,
+            ],
+
+            'restaurants' => [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+                'deactivated' => 0,
+            ],
+
+            'addresses' => [
+                'created' => 0,
+                'updated' => 0,
+                'unchanged' => 0,
+                'deactivated' => 0,
+            ],
+
+            'catalog_jobs' => 0,
         ];
     }
 
     /**
-     * @param  array<string, mixed>  $city
-     * @param  array<string, mixed>  $company
-     * @return array<string, mixed>
+     * @param  array<string, mixed>  $entity
      */
-    private function restaurantAttributes(array $city, array $company): array
-    {
-        return [
-            'name' => $company['name'],
-            'slug' => $company['url'],
-            'currency' => strtoupper((string) Arr::get($city, 'currency.token', 'UAH')),
-            'locale' => 'uk-UA',
-            'timezone' => (string) ($city['timezone'] ?? 'Europe/Kyiv'),
-            'is_active' => $this->isActiveDotsEntity($company),
-            'image_url' => $company['image'] ?? null,
-            'available_payment_types' => $this->availablePaymentTypes($company['availablePaymentTypes'] ?? []),
-            'available_delivery_types' => $company['availableDeliveryTypes'] ?? [],
-            'schedule' => $company['schedule'] ?? null,
-            'delivery_time_text' => $company['deliveryTimeText'] ?? null,
-            'delivery_price_text' => $company['deliveryPriceText'] ?? null,
-        ];
-    }
+    private function isActiveDotsEntity(
+        array $entity,
+    ): bool {
+        /** @var int|string $status */
+        $status =
+            $entity['status'] ?? 0;
 
-    /**
-     * @param  array<int, array{type: int}>  $paymentTypes
-     * @return list<int>
-     */
-    private function availablePaymentTypes(array $paymentTypes): array
-    {
-        return array_map(static fn (array $paymentType): int => (int) $paymentType['type'], $paymentTypes);
-    }
-
-    /**
-     * @param  array<string, mixed>  $address
-     * @return array<string, mixed>
-     */
-    private function addressAttributes(array $address): array
-    {
-        return [
-            'title' => $address['title'],
-            'latitude' => Arr::get($address, 'location.latitude'),
-            'longitude' => Arr::get($address, 'location.longitude'),
-            'polygon' => $address['polygon'] ?? null,
-            'is_active' => $this->isActiveDotsEntity($address + ['status' => 1]),
-        ];
+        return (int) $status === 1;
     }
 }

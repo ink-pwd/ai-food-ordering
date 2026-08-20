@@ -11,17 +11,18 @@ use App\Telegram\Support\RestaurantNavigationContext;
 use App\Telegram\TelegramMessageEditor;
 use SergiX44\Nutgram\Nutgram;
 
-final class RestaurantSelectionHandler
+final readonly class RestaurantSelectionHandler
 {
     public function __construct(
-        private readonly CallbackAcknowledger $callbackAcknowledger,
-        private readonly TelegramSessionRecovery $sessionRecovery,
-        private readonly OrderingBackendClient $backend,
-        private readonly OnboardingFlow $onboarding,
-        private readonly RestaurantKeyboard $restaurantKeyboard,
-        private readonly RestaurantNavigationContext $navigationContext,
-        private readonly TelegramMessageEditor $messageEditor,
-    ) {}
+        private CallbackAcknowledger $callbackAcknowledger,
+        private TelegramSessionRecovery $sessionRecovery,
+        private OrderingBackendClient $backend,
+        private OnboardingFlow $onboarding,
+        private RestaurantKeyboard $restaurantKeyboard,
+        private RestaurantNavigationContext $navigationContext,
+        private TelegramMessageEditor $messageEditor,
+    ) {
+    }
 
     public function select(Nutgram $bot, int $restaurantId): void
     {
@@ -46,7 +47,7 @@ final class RestaurantSelectionHandler
         $this->onboarding->editFulfillmentOptions(
             bot: $bot,
             sessionToken: $sessionToken,
-            context: $this->navigationContext->encode($selection['restaurant']['id'], $sessionToken),
+            context: $this->navigationContext->encode($selection['restaurant']->id, $sessionToken),
         );
     }
 

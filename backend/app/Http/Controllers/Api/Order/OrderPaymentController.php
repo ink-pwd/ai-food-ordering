@@ -2,24 +2,27 @@
 
 namespace App\Http\Controllers\Api\Order;
 
+use App\DTO\SessionData;
 use App\Http\Controllers\Controller;
+use App\Services\Handlers\Order\FindCurrentOrderHandler;
 use App\Services\Handlers\Order\ResolveOrderPaymentHandler;
-use App\Services\Repositories\OrderRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class OrderPaymentController extends Controller
 {
-    public function __invoke(Request $request, OrderRepository $orders, ResolveOrderPaymentHandler $payments): JsonResponse
-    {
+    public function __invoke(
+        Request $request,
+        FindCurrentOrderHandler $findCurrentOrderHandler,
+        ResolveOrderPaymentHandler $payments,
+    ): JsonResponse {
+        /** @var SessionData $session */
         $session = $request->attributes->get('internal_session');
-        $order = $orders->findCurrentForSession($session['id']);
 
-        if ($order === null) {
-            throw new NotFoundHttpException('Order was not found.');
-        }
+        $order = $findCurrentOrderHandler->handle(
+            $session->id,
+        );
 
         $result = $payments->handle($order);
 

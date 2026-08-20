@@ -13,7 +13,8 @@ final class TelegramSessionRecovery
         private readonly TelegramSessionManager $sessions,
         private readonly OrderingBackendClient $backend,
         private readonly ContactOnboarding $onboarding,
-    ) {}
+    ) {
+    }
 
     public function tokenOrRecover(Nutgram $bot): ?string
     {

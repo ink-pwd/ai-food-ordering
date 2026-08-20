@@ -23,7 +23,8 @@ class ResolveOrderPaymentQrHandler
 
     public function __construct(
         private readonly OrderRepository $orders,
-    ) {}
+    ) {
+    }
 
     /** @return array{contents: string, order: Order} */
     public function handle(Order $order): array
@@ -36,12 +37,18 @@ class ResolveOrderPaymentQrHandler
             ]);
         }
 
+        /** @var string $checkoutUrl */
+        $checkoutUrl = $checkoutUrl;
+
         $fingerprint = $this->fingerprint($checkoutUrl);
 
         if ($this->hasReusableQr($order, $fingerprint)) {
-            $contents = Storage::disk(self::DISK)->get($order->payment_qr_path);
+            /** @var string $paymentQrPath */
+            $paymentQrPath = $order->payment_qr_path;
+            $contents = Storage::disk(self::DISK)->get($paymentQrPath);
 
             if ($this->isValidPng($contents)) {
+                /** @var string $contents */
                 return ['contents' => $contents, 'order' => $order];
             }
         }

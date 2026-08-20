@@ -2,11 +2,12 @@
 
 namespace App\Integrations\Dots;
 
-class DiscoveryApi
+readonly class DiscoveryApi
 {
     public function __construct(
-        private readonly DotsClient $dotsClient,
-    ) {}
+        private DotsClient $dotsClient,
+    ) {
+    }
 
     /**
      * @return array<string, mixed>

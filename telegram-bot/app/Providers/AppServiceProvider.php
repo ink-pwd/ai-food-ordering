@@ -3,8 +3,8 @@
 namespace App\Providers;
 
 use App\Telegram\Session\TelegramSessionStore;
-use Illuminate\Support\ServiceProvider;
 use App\Telegram\Support\DeliveryAddressPromptStore;
+use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {

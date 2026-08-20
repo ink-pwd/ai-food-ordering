@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Order;
 
+use App\DTO\SessionData;
 use App\Http\Controllers\Controller;
 use App\Http\Responses\OrderResponse;
 use App\Services\Handlers\Order\ShowCurrentOrderHandler;
@@ -13,7 +14,7 @@ class OrderCurrentController extends Controller
         Request $request,
         ShowCurrentOrderHandler $showCurrentOrder,
     ): OrderResponse {
-        /** @var array{id: string} $session */
+        /** @var SessionData $session */
         $session = $request->attributes->get('internal_session');
 
         return new OrderResponse(

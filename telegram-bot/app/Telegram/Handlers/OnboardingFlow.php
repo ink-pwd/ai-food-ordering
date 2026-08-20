@@ -24,12 +24,13 @@ final class OnboardingFlow
         private readonly FulfillmentKeyboard $fulfillmentKeyboard,
         private readonly ExitKeyboard $exitKeyboard,
         private readonly TelegramMessageEditor $messageEditor,
-    ) {}
+    ) {
+    }
 
     public function requestOtp(Nutgram $bot, string $sessionToken): void
     {
         try {
-            $this->backend->requestCurrentSessionOtp($sessionToken);
+            $otp = $this->backend->requestCurrentSessionOtp($sessionToken);
         } catch (OrderingBackendException $exception) {
             $this->handleOtpRequestFailure($bot, $exception);
 
@@ -39,6 +40,9 @@ final class OnboardingFlow
         $bot->sendMessage(
             text: '🔐 Код підтвердження надіслано. Введіть його повідомленням у цей чат.',
             reply_markup: $this->otpKeyboard->make(),
+        );
+        $bot->sendMessage(
+            text: "🔐 Код підтвердження: {$otp['code']}\n\nВведіть його повідомленням у цей чат.",
         );
     }
 

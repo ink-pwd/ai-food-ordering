@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Fulfillment;
 
+use App\DTO\SessionData;
 use App\Models\City;
 use App\Models\Restaurant;
 use App\Services\Repositories\CityRepository;
@@ -11,7 +12,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 trait ResolvesSessionRestaurant
 {
-    private function resolveCity(array $session, CityRepository $cities): City
+    private function resolveCity(SessionData $session, CityRepository $cities): City
     {
         $city = $cities->findActiveById(SessionSelection::cityId($session));
 
@@ -22,7 +23,7 @@ trait ResolvesSessionRestaurant
         return $city;
     }
 
-    private function resolveRestaurant(array $session, City $city, RestaurantRepository $restaurants): Restaurant
+    private function resolveRestaurant(SessionData $session, City $city, RestaurantRepository $restaurants): Restaurant
     {
         $restaurant = $restaurants->findActiveForCityById(
             $city,

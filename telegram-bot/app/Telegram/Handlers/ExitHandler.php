@@ -9,14 +9,15 @@ use App\Telegram\Session\TelegramSessionManager;
 use App\Telegram\Session\TelegramSessionRecovery;
 use SergiX44\Nutgram\Nutgram;
 
-final class ExitHandler
+final readonly class ExitHandler
 {
     public function __construct(
-        private readonly CallbackAcknowledger $callbackAcknowledger,
-        private readonly TelegramSessionManager $sessions,
-        private readonly TelegramSessionRecovery $sessionRecovery,
-        private readonly ContactOnboarding $onboarding,
-    ) {}
+        private CallbackAcknowledger $callbackAcknowledger,
+        private TelegramSessionManager $sessions,
+        private TelegramSessionRecovery $sessionRecovery,
+        private ContactOnboarding $onboarding,
+    ) {
+    }
 
     public function __invoke(Nutgram $bot): void
     {

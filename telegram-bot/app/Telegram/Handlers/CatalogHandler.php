@@ -13,18 +13,19 @@ use App\Telegram\Support\RestaurantNavigationContext;
 use App\Telegram\TelegramMessageEditor;
 use SergiX44\Nutgram\Nutgram;
 
-final class CatalogHandler
+final readonly class CatalogHandler
 {
     public function __construct(
-        private readonly CallbackAcknowledger $callbackAcknowledger,
-        private readonly TelegramSessionRecovery $sessionRecovery,
-        private readonly OrderingBackendClient $backend,
-        private readonly CatalogKeyboard $keyboard,
-        private readonly CatalogMessageFormatter $formatter,
-        private readonly MainMenuKeyboard $mainMenu,
-        private readonly RestaurantNavigationContext $navigationContext,
-        private readonly TelegramMessageEditor $messageEditor,
-    ) {}
+        private CallbackAcknowledger $callbackAcknowledger,
+        private TelegramSessionRecovery $sessionRecovery,
+        private OrderingBackendClient $backend,
+        private CatalogKeyboard $keyboard,
+        private CatalogMessageFormatter $formatter,
+        private MainMenuKeyboard $mainMenu,
+        private RestaurantNavigationContext $navigationContext,
+        private TelegramMessageEditor $messageEditor,
+    ) {
+    }
 
     public function catalog(Nutgram $bot, int $restaurantId, string $fingerprint): void
     {
@@ -162,8 +163,8 @@ final class CatalogHandler
         }
 
         foreach ($restaurants as $restaurant) {
-            if ($restaurant['id'] === $restaurantId) {
-                return $context + ['restaurantSlug' => $restaurant['slug']];
+            if ($restaurant->id === $restaurantId) {
+                return $context + ['restaurantSlug' => $restaurant->slug];
             }
         }
 

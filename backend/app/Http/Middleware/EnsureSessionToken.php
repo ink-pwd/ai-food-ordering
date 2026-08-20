@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\DTO\SessionData;
 use App\Enums\SessionChannel;
 use App\Enums\SessionStatus;
 use App\Services\Repositories\SessionRepository;
@@ -11,11 +12,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Symfony\Component\HttpFoundation\Response;
 
-class EnsureSessionToken
+readonly class EnsureSessionToken
 {
     public function __construct(
-        private readonly SessionRepository $sessions,
-    ) {}
+        private SessionRepository $sessions,
+    ) {
+    }
 
     /**
      * Handle an incoming request.
@@ -36,7 +38,11 @@ class EnsureSessionToken
             return $this->unauthenticated();
         }
 
-        $request->attributes->set('internal_session', $session);
+        /** @var array{id: string, city_id?: int|null, restaurant_id?: int|null, fulfillment?: array<string, mixed>|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string} $session */
+        $request->attributes->set(
+            'internal_session',
+            SessionData::fromArray($session),
+        );
 
         return $next($request);
     }
@@ -50,20 +56,17 @@ class EnsureSessionToken
             return false;
         }
 
-        if (! isset($session['id']) || ! is_string($session['id']) || $session['id'] === '') {
+        if ($this->hasInvalidSessionId($session)) {
             return false;
         }
 
         foreach (['city_id', 'restaurant_id'] as $selectionKey) {
-            if (array_key_exists($selectionKey, $session)
-                && $session[$selectionKey] !== null
-                && (! is_int($session[$selectionKey]) || $session[$selectionKey] < 1)
-            ) {
+            if ($this->hasInvalidSelection($session, $selectionKey)) {
                 return false;
             }
         }
 
-        if (! isset($session['channel']) || ! is_string($session['channel']) || ! SessionChannel::tryFrom($session['channel'])) {
+        if ($this->hasInvalidChannel($session)) {
             return false;
         }
 
@@ -86,6 +89,41 @@ class EnsureSessionToken
         }
 
         return $expiresAt->isFuture();
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function hasInvalidSessionId(array $session): bool
+    {
+        return ! isset($session['id'])
+            || ! is_string($session['id'])
+            || $session['id'] === '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function hasInvalidSelection(
+        array $session,
+        string $selectionKey,
+    ): bool {
+        return array_key_exists($selectionKey, $session)
+            && $session[$selectionKey] !== null
+            && (
+                ! is_int($session[$selectionKey])
+                || $session[$selectionKey] < 1
+            );
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function hasInvalidChannel(array $session): bool
+    {
+        return ! isset($session['channel'])
+            || ! is_string($session['channel'])
+            || ! SessionChannel::tryFrom($session['channel']);
     }
 
     private function unauthenticated(): JsonResponse

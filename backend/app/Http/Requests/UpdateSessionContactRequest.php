@@ -35,12 +35,18 @@ class UpdateSessionContactRequest extends FormRequest
 
     public function contactName(): string
     {
-        return (string) $this->validated('name');
+        /** @var string $name */
+        $name = $this->validated('name');
+
+        return (string) $name;
     }
 
     public function normalizedPhone(): string
     {
-        return $this->normalizePhone((string) $this->validated('phone'));
+        /** @var string $phone */
+        $phone = $this->validated('phone');
+
+        return $this->normalizePhone((string) $phone);
     }
 
     public function sessionToken(): string
@@ -48,6 +54,7 @@ class UpdateSessionContactRequest extends FormRequest
         return (string) $this->headers->get('X-Session-Token');
     }
 
+    /** @return array<int, \Closure(Validator): void> */
     public function after(): array
     {
         return [
@@ -58,14 +65,30 @@ class UpdateSessionContactRequest extends FormRequest
 
                 $phone = $this->input('phone');
 
-                if (! is_string($phone)
-                    || preg_match('/[^+\d\s\-()]/', $phone) === 1
-                    || ! $this->isValidNormalizedPhone($this->normalizePhone($phone))
-                ) {
+                if ($this->isInvalidPhone($phone)) {
                     $validator->errors()->add('phone', 'The phone field must be a valid phone number.');
                 }
             },
         ];
+    }
+
+    private function isInvalidPhone(mixed $phone): bool
+    {
+        return ! is_string($phone)
+            || preg_match('/[^+\d\s\-()]/', $phone) === 1
+            || ! $this->isValidNormalizedPhone(
+                $this->normalizePhone($phone),
+            );
+    }
+
+    private function hasInvalidPlusPlacement(
+        string $normalizedPhone,
+    ): bool {
+        return substr_count($normalizedPhone, '+') > 1
+            || (
+                str_contains($normalizedPhone, '+')
+                && ! str_starts_with($normalizedPhone, '+')
+            );
     }
 
     private function normalizePhone(string $phone): string
@@ -76,7 +99,7 @@ class UpdateSessionContactRequest extends FormRequest
             return $normalizedPhone;
         }
 
-        if (substr_count($normalizedPhone, '+') > 1 || (str_contains($normalizedPhone, '+') && ! str_starts_with($normalizedPhone, '+'))) {
+        if ($this->hasInvalidPlusPlacement($normalizedPhone)) {
             return $normalizedPhone;
         }
 

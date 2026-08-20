@@ -11,7 +11,8 @@ final class CallbackAcknowledger
 {
     public function __construct(
         private readonly LoggerInterface $logger,
-    ) {}
+    ) {
+    }
 
     public function acknowledge(Nutgram $bot): bool
     {

@@ -12,7 +12,8 @@ final class TelegramMessageEditor
 {
     public function __construct(
         private readonly LoggerInterface $logger,
-    ) {}
+    ) {
+    }
 
     public function edit(Nutgram $bot, string $text, InlineKeyboardMarkup $keyboard): void
     {

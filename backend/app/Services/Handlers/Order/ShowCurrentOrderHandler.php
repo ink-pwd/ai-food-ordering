@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Order;
 
+use App\DTO\SessionData;
 use App\Enums\OrderStatus;
 use App\Integrations\Dots\OrdersApi;
 use App\Models\Order;
@@ -11,17 +12,17 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class ShowCurrentOrderHandler
+readonly class ShowCurrentOrderHandler
 {
     public function __construct(
-        private readonly OrderRepository $orders,
-        private readonly OrdersApi $dotsOrders,
-    ) {}
+        private OrderRepository $orders,
+        private OrdersApi $dotsOrders,
+    ) {
+    }
 
-    /** @param array{id: string} $session */
-    public function handle(array $session): Order
+    public function handle(SessionData $session): Order
     {
-        $order = $this->orders->findCurrentForSession($session['id']);
+        $order = $this->orders->findCurrentForSession($session->id);
 
         if ($order === null) {
             throw new NotFoundHttpException('Order was not found.');
@@ -42,9 +43,12 @@ class ShowCurrentOrderHandler
 
     private function refreshFromDots(Order $order): Order
     {
+        /** @var string $externalOrderId */
+        $externalOrderId = $order->external_order_id;
+
         try {
             $response = $this->dotsOrders->get(
-                $order->external_order_id,
+                $externalOrderId,
             );
         } catch (RequestException $exception) {
             if (! $exception->response->notFound()) {

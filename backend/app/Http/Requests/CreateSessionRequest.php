@@ -34,11 +34,17 @@ class CreateSessionRequest extends FormRequest
 
     public function channel(): SessionChannel
     {
-        return SessionChannel::from((string) $this->validated('channel'));
+        /** @var string $channel */
+        $channel = $this->validated('channel');
+
+        return SessionChannel::from((string) $channel);
     }
 
     public function externalSessionId(): string
     {
-        return (string) $this->validated('external_session_id');
+        /** @var string $externalSessionId */
+        $externalSessionId = $this->validated('external_session_id');
+
+        return (string) $externalSessionId;
     }
 }

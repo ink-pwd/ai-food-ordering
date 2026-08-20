@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use App\Enums\FulfillmentType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Enum;
@@ -25,13 +26,18 @@ class SelectFulfillmentTypeRequest extends FormRequest
 
     public function fulfillmentType(): FulfillmentType
     {
-        return FulfillmentType::from((string) $this->validated('type'));
+        /** @var string $type */
+        $type = $this->validated('type');
+
+        return FulfillmentType::from((string) $type);
     }
 
-    /** @return array<string, mixed> */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 
     public function sessionToken(): string

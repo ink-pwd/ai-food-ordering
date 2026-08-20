@@ -36,7 +36,10 @@ class DotsClient
             ->get($path, array_merge($query, ['v' => config('services.dots.api_version')]))
             ->throw();
 
-        return $response->json();
+        /** @var array<string, mixed> $data */
+        $data = $response->json();
+
+        return $data;
     }
 
     /**
@@ -69,7 +72,10 @@ class DotsClient
             )
             ->throw();
 
-        return $response->json();
+        /** @var array<string, mixed> $data */
+        $data = $response->json();
+
+        return $data;
     }
 
     /**
@@ -88,7 +94,10 @@ class DotsClient
             ->post($path, $payload)
             ->throw();
 
-        return $response->json();
+        /** @var array<string, mixed> $data */
+        $data = $response->json();
+
+        return $data;
     }
 
     /** @param array<string, mixed> $payload
@@ -107,16 +116,26 @@ class DotsClient
             ->post($path, $payload)
             ->throw();
 
-        return $response->json();
+        /** @var array<string, mixed> $data */
+        $data = $response->json();
+
+        return $data;
     }
 
     private function request(): PendingRequest
     {
-        return Http::baseUrl(config('services.dots.base_url'))
+        /** @var string $baseUrl */
+        $baseUrl = config('services.dots.base_url');
+        /** @var string $token */
+        $token = config('services.dots.token');
+        /** @var string $accountToken */
+        $accountToken = config('services.dots.account_token');
+
+        return Http::baseUrl($baseUrl)
             ->acceptJson()
             ->withHeaders([
-                'Api-Token' => config('services.dots.token'),
-                'Api-Account-Token' => config('services.dots.account_token'),
+                'Api-Token' => $token,
+                'Api-Account-Token' => $accountToken,
                 'Api-lang' => 'ua',
             ])
             ->connectTimeout(self::CONNECT_TIMEOUT_SECONDS)

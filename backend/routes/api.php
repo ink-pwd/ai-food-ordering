@@ -24,12 +24,12 @@ use App\Http\Controllers\Api\Session\SessionFulfillmentController;
 use App\Http\Controllers\Api\Session\SessionFulfillmentOptionsController;
 use App\Http\Controllers\Api\Session\SessionOtpController;
 use App\Http\Controllers\Api\Session\SessionOtpVerifyController;
+use App\Http\Controllers\Api\Session\SessionPaymentController;
 use App\Http\Controllers\Api\Session\SessionPickupAddressController;
 use App\Http\Controllers\Api\Session\SessionPickupAddressIndexController;
 use App\Http\Controllers\Api\Session\SessionRestaurantController;
 use App\Http\Controllers\Api\Session\SessionRestaurantIndexController;
 use App\Http\Controllers\Api\Session\SessionStoreController;
-use App\Http\Controllers\Api\Session\SessionPaymentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('cities', CityIndexController::class)

@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\SessionData;
 use App\Models\Restaurant;
 use App\Services\Repositories\CityRepository;
 use App\Services\Repositories\RestaurantRepository;
@@ -16,19 +17,22 @@ class SelectSessionRestaurantHandler
         private readonly CityRepository $cities,
         private readonly RestaurantRepository $restaurants,
         private readonly SessionRepository $sessions,
-    ) {}
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
-     * @return array{session: array<string, mixed>, restaurant: Restaurant}
+     * @return array{session: SessionData, restaurant: Restaurant}
      */
-    public function handle(string $plainToken, array $session, int $restaurantId): array
-    {
+    public function handle(
+        string $plainToken,
+        SessionData $session,
+        int $restaurantId,
+    ): array {
         SessionSelection::assertPhoneVerified($session);
 
         $cityId = SessionSelection::cityId($session);
 
-        if (($session['restaurant_id'] ?? null) !== null) {
+        if (($session->restaurantId) !== null) {
             throw new ConflictHttpException('Restaurant has already been selected.');
         }
 
@@ -51,7 +55,7 @@ class SelectSessionRestaurantHandler
         }
 
         return [
-            'session' => $updatedSession,
+            'session' => SessionData::fromArray($updatedSession),
             'restaurant' => $restaurant,
         ];
     }

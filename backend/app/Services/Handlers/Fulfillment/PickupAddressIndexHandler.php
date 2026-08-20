@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Fulfillment;
 
+use App\DTO\SessionData;
 use App\Services\Repositories\CityRepository;
 use App\Services\Repositories\RestaurantAddressRepository;
 use App\Services\Repositories\RestaurantRepository;
@@ -16,13 +17,13 @@ class PickupAddressIndexHandler
         private readonly CityRepository $cities,
         private readonly RestaurantRepository $restaurants,
         private readonly RestaurantAddressRepository $addresses,
-    ) {}
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
      * @return Collection<int, \App\Models\RestaurantAddress>
      */
-    public function handle(array $session): Collection
+    public function handle(SessionData $session): Collection
     {
         SessionSelection::assertPhoneVerified($session);
         $city = $this->resolveCity($session, $this->cities);

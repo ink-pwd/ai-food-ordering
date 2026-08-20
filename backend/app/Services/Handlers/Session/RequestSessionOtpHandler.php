@@ -2,24 +2,26 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\OtpChallengeData;
+use App\DTO\SessionData;
 use App\Services\Contracts\OtpSender;
 use App\Services\Repositories\OtpChallengeRepository;
 use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\Hash;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
-class RequestSessionOtpHandler
+readonly class RequestSessionOtpHandler
 {
     public function __construct(
-        private readonly OtpChallengeRepository $otps,
-        private readonly OtpSender $sender,
-    ) {}
+        private OtpChallengeRepository $otps,
+        private OtpSender $sender,
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
-     * @return array{expires_in: int, resend_available_in: int}
+     * @return array{expires_in: int, resend_available_in: int, code: string}
      */
-    public function handle(array $session): array
+    public function handle(SessionData $session): array
     {
         $contact = SessionSelection::contact($session);
 
@@ -31,14 +33,14 @@ class RequestSessionOtpHandler
             throw new ConflictHttpException('Phone is already verified.');
         }
 
-        if (($session['city_id'] ?? null) !== null || ($session['restaurant_id'] ?? null) !== null) {
+        if (($session->cityId) !== null || ($session->restaurantId) !== null) {
             throw new ConflictHttpException('OTP cannot be requested after city or restaurant selection.');
         }
 
-        $existingChallenge = $this->otps->find($session['id']);
+        $existingChallenge = $this->otps->find($session->id);
 
-        if ($existingChallenge !== null && ($existingChallenge['phone'] ?? null) === $contact['phone']) {
-            $resendAvailableAt = now()->parse($existingChallenge['resend_available_at']);
+        if ($existingChallenge !== null && $existingChallenge->phone === $contact['phone']) {
+            $resendAvailableAt = now()->parse($existingChallenge->resendAvailableAt);
 
             if ($resendAvailableAt->isFuture()) {
                 throw new ConflictHttpException('OTP resend is not available yet.');
@@ -49,20 +51,24 @@ class RequestSessionOtpHandler
         $expiresAt = now()->addSeconds($this->ttlSeconds());
         $resendAvailableAt = now()->addSeconds($this->cooldownSeconds());
 
-        $this->otps->put($session['id'], [
-            'session_id' => $session['id'],
-            'phone' => $contact['phone'],
-            'code_hash' => Hash::make($code),
-            'attempts_remaining' => $this->maxAttempts(),
-            'expires_at' => $expiresAt->toIso8601String(),
-            'resend_available_at' => $resendAvailableAt->toIso8601String(),
-        ]);
+        $this->otps->put(
+            $session->id,
+            new OtpChallengeData(
+                sessionId: $session->id,
+                phone: $contact['phone'],
+                codeHash: Hash::make($code),
+                attemptsRemaining: $this->maxAttempts(),
+                expiresAt: $expiresAt->toIso8601String(),
+                resendAvailableAt: $resendAvailableAt->toIso8601String(),
+            ),
+        );
 
         $this->sender->send($contact['phone'], $code);
 
         return [
             'expires_in' => $this->ttlSeconds(),
             'resend_available_in' => $this->cooldownSeconds(),
+            'code' => $code,
         ];
     }
 
@@ -76,21 +82,33 @@ class RequestSessionOtpHandler
 
     private function codeLength(): int
     {
-        return max(4, min(10, (int) config('services.internal.otp.code_length')));
+        /** @var int|string $codeLength */
+        $codeLength = config('services.internal.otp.code_length');
+
+        return max(4, min(10, (int) $codeLength));
     }
 
     private function ttlSeconds(): int
     {
-        return max(60, (int) config('services.internal.otp.ttl_seconds'));
+        /** @var int|string $ttlSeconds */
+        $ttlSeconds = config('services.internal.otp.ttl_seconds');
+
+        return max(60, (int) $ttlSeconds);
     }
 
     private function cooldownSeconds(): int
     {
-        return max(1, (int) config('services.internal.otp.resend_cooldown_seconds'));
+        /** @var int|string $cooldownSeconds */
+        $cooldownSeconds = config('services.internal.otp.resend_cooldown_seconds');
+
+        return max(1, (int) $cooldownSeconds);
     }
 
     private function maxAttempts(): int
     {
-        return max(1, (int) config('services.internal.otp.max_attempts'));
+        /** @var int|string $maxAttempts */
+        $maxAttempts = config('services.internal.otp.max_attempts');
+
+        return max(1, (int) $maxAttempts);
     }
 }

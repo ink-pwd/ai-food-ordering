@@ -2,11 +2,12 @@
 
 namespace App\Integrations\Dots;
 
-class FulfillmentApi
+readonly class FulfillmentApi
 {
     public function __construct(
-        private readonly DotsClient $dotsClient,
-    ) {}
+        private DotsClient $dotsClient,
+    ) {
+    }
 
     /**
      * @param  array<string, mixed>  $payload

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class CreateCartRequest extends FormRequest
@@ -35,11 +36,11 @@ class CreateCartRequest extends FormRequest
         ];
     }
 
-    /**
-     * @return array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}
-     */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 }

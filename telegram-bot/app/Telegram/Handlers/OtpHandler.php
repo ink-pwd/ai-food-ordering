@@ -19,7 +19,8 @@ final class OtpHandler
         private readonly OnboardingFlow $onboarding,
         private readonly OtpKeyboard $otpKeyboard,
         private readonly TelegramMessageEditor $messageEditor,
-    ) {}
+    ) {
+    }
 
     public function verify(Nutgram $bot, string $code): void
     {
@@ -54,7 +55,7 @@ final class OtpHandler
         }
 
         try {
-            $this->backend->requestCurrentSessionOtp($sessionToken);
+            $otp = $this->backend->requestCurrentSessionOtp($sessionToken);
         } catch (OrderingBackendException $exception) {
             $this->handleResendFailure($bot, $exception);
 
@@ -63,7 +64,7 @@ final class OtpHandler
 
         $this->messageEditor->edit(
             bot: $bot,
-            text: '🔐 Новий код надіслано. Введіть його повідомленням у цей чат.',
+            text: "🔐 Новий код: {$otp['code']}\n\nВведіть його повідомленням у цей чат.",
             keyboard: $this->otpKeyboard->make(),
         );
     }

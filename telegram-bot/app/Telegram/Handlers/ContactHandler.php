@@ -11,25 +11,36 @@ use SergiX44\Nutgram\Nutgram;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\ReplyKeyboardRemove;
 use SergiX44\Nutgram\Telegram\Types\User\User;
 
-final class ContactHandler
+final readonly class ContactHandler
 {
     public function __construct(
-        private readonly TelegramSessionRecovery $sessionRecovery,
-        private readonly OrderingBackendClient $backend,
-        private readonly ContactOnboarding $onboarding,
-        private readonly OnboardingFlow $onboardingFlow,
-    ) {}
+        private TelegramSessionRecovery $sessionRecovery,
+        private OrderingBackendClient $backend,
+        private ContactOnboarding $onboarding,
+        private OnboardingFlow $onboardingFlow,
+    ) {
+    }
 
     public function __invoke(Nutgram $bot): void
     {
         $contact = $bot->message()?->contact;
         $sender = $bot->user();
 
-        if ($contact?->user_id === null || $sender === null || $contact->user_id !== $sender->id) {
+        if (
+            $this->isInvalidContactOwner(
+                $contact?->user_id,
+                $sender,
+            )
+        ) {
             $this->onboarding->request($bot, 'Будь ласка, надішліть свій власний номер телефону.');
 
             return;
         }
+
+        /** @var User $sender */
+        $sender = $sender;
+        /** @var \SergiX44\Nutgram\Telegram\Types\Media\Contact $contact */
+        $contact = $contact;
 
         $sessionToken = $this->sessionRecovery->tokenOrRecover($bot);
 
@@ -55,6 +66,15 @@ final class ContactHandler
         );
 
         $this->onboardingFlow->requestOtp($bot, $sessionToken);
+    }
+
+    private function isInvalidContactOwner(
+        ?int $contactUserId,
+        ?User $sender,
+    ): bool {
+        return $contactUserId === null
+            || $sender === null
+            || $contactUserId !== $sender->id;
     }
 
     private function telegramName(User $sender): string

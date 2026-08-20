@@ -7,13 +7,14 @@ use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-class CartResponse implements Responsable
+readonly class CartResponse implements Responsable
 {
     public function __construct(
-        private readonly Cart $cart,
-        private readonly bool $created = false,
-        private readonly ?int $status = null,
-    ) {}
+        private Cart $cart,
+        private bool $created = false,
+        private ?int $status = null,
+    ) {
+    }
 
     public function toResponse($request): Response
     {

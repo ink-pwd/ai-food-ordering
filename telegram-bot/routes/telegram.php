@@ -85,6 +85,6 @@ $bot->onCallbackQueryData('order:refresh:{restaurantId}:{fingerprint}', [Checkou
 $bot->onCallbackQueryData('payment:refresh:{restaurantId}:{fingerprint}', [CheckoutHandler::class, 'refreshPayment'])
     ->whereNumber('restaurantId');
 
-$bot->onCallbackQueryData('checkout:payment:{paymentType}:{restaurantId}:{fingerprint}', [CheckoutHandler::class, 'payment'],)
+$bot->onCallbackQueryData('checkout:payment:{paymentType}:{restaurantId}:{fingerprint}', [CheckoutHandler::class, 'payment'], )
     ->whereNumber('paymentType')
     ->whereNumber('restaurantId');

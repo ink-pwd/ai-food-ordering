@@ -5,6 +5,7 @@ namespace App\Services\Repositories;
 use App\Enums\CartStatus;
 use App\Models\Cart;
 use App\Models\CartItem;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\Restaurant;
 use Carbon\CarbonInterface;
@@ -110,8 +111,25 @@ class CartRepository
         return CartItem::query()
             ->where('cart_id', $cart->id)
             ->pluck('total')
-            ->map(static fn ($total): string => (string) $total)
+            ->map(static function (mixed $total): string {
+                /** @var int|float|string $total */
+                return (string) $total;
+            })
             ->all();
+    }
+
+    public function loadItemsWithProducts(Cart $cart): Cart
+    {
+        return $cart->load([
+            'items' => fn ($query) => $query
+                ->orderBy('id')
+                ->with('product'),
+        ]);
+    }
+
+    public function findForOrderOrFail(Order $order): Cart
+    {
+        return Cart::query()->findOrFail($order->cart_id);
     }
 
     public function updateTotals(Cart $cart, string $subtotal, string $total): Cart
@@ -201,8 +219,11 @@ class CartRepository
 
     public function deleteItems(Cart $cart): int
     {
-        return CartItem::query()
+        /** @var int $deleted */
+        $deleted = CartItem::query()
             ->where('cart_id', $cart->id)
             ->delete();
+
+        return $deleted;
     }
 }

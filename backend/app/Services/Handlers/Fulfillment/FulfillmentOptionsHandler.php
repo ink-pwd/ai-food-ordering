@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Fulfillment;
 
+use App\DTO\SessionData;
 use App\Enums\FulfillmentType;
 use App\Services\Repositories\CityRepository;
 use App\Services\Repositories\RestaurantAddressRepository;
@@ -17,13 +18,13 @@ class FulfillmentOptionsHandler
         private readonly CityRepository $cities,
         private readonly RestaurantRepository $restaurants,
         private readonly RestaurantAddressRepository $addresses,
-    ) {}
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
      * @return array<int, array{type: string}>
      */
-    public function handle(array $session): array
+    public function handle(SessionData $session): array
     {
         SessionSelection::assertPhoneVerified($session);
         $city = $this->resolveCity($session, $this->cities);

@@ -14,42 +14,57 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Throwable;
 
-class CatalogSynchronizationOrchestrator
+readonly class CatalogSynchronizationOrchestrator
 {
     public function __construct(
-        private readonly CatalogApi $catalogApi,
-        private readonly CategorySynchronizationHandler $categorySynchronizationHandler,
-        private readonly ProductSynchronizationHandler $productSynchronizationHandler,
-        private readonly ProductAvailabilityReconciler $productAvailabilityReconciler,
-        private readonly CatalogSyncLogRepository $logs,
-    ) {}
+        private CatalogApi $catalogApi,
+        private CategorySynchronizationHandler $categorySynchronizationHandler,
+        private ProductSynchronizationHandler $productSynchronizationHandler,
+        private ProductAvailabilityReconciler $productAvailabilityReconciler,
+        private CatalogSyncLogRepository $logs,
+    ) {
+    }
 
-    public function sync(Restaurant $restaurant): CatalogSyncLog
-    {
-        $log = $this->logs->createRunning($restaurant);
+    public function sync(
+        Restaurant $restaurant,
+    ): CatalogSyncLog {
+        $log = $this->logs->createRunning(
+            $restaurant,
+        );
 
         try {
-            $catalog = $this->catalogApi->refreshCompanyCatalog($restaurant->external_company_id);
+            $catalog =
+                $this->catalogApi
+                    ->refreshCompanyCatalog(
+                        $restaurant
+                            ->external_company_id,
+                    );
 
-            $this->validateCatalog($catalog);
+            $this->validateCatalog(
+                $catalog,
+            );
 
-            DB::transaction(function () use ($restaurant, $catalog, $log): void {
-                $categoryResult = $this->categorySynchronizationHandler->sync($restaurant, $catalog['items']);
-                $productResult = $this->productSynchronizationHandler->sync($restaurant, $catalog['items']);
-                $deactivatedCount = $this->productAvailabilityReconciler->deactivateMissing($restaurant, $catalog['items']);
+            // Categories, products, availability reconciliation, and the success log form one catalog snapshot.
+            DB::transaction(
+                fn (): null => $this
+                    ->syncCatalogWithinTransaction(
+                        $restaurant,
+                        $catalog,
+                        $log,
+                    ),
+            );
 
-                $this->logs->markSucceeded($log, [
-                    'categories' => $categoryResult,
-                    'products' => array_merge($productResult, [
-                        'deactivated' => $deactivatedCount,
-                    ]),
-                ]);
-            });
-
-            return $log->fresh();
+            return $this->logs->refresh(
+                $log,
+            );
         } catch (Throwable $throwable) {
             try {
-                $this->logs->markFailed($log, $this->safeErrorMessage($throwable));
+                $this->logs->markFailed(
+                    $log,
+                    $this->safeErrorMessage(
+                        $throwable,
+                    ),
+                );
             } catch (Throwable) {
                 // Failure logging is best effort; preserve the original synchronization exception.
             }
@@ -61,38 +76,136 @@ class CatalogSynchronizationOrchestrator
     /**
      * @param  array<string, mixed>  $catalog
      */
-    private function validateCatalog(array $catalog): void
-    {
-        $validator = Validator::make($catalog, [
-            'items' => ['present', 'array', 'list'],
-            'hasNext' => ['required', 'boolean'],
-        ]);
+    private function syncCatalogWithinTransaction(
+        Restaurant $restaurant,
+        array $catalog,
+        CatalogSyncLog $log,
+    ): null {
+        /** @var array<int, array<string, mixed>> $catalogItems */
+        $catalogItems = $catalog['items'];
 
-        $validator->after(function ($validator) use ($catalog): void {
-            if (($catalog['hasNext'] ?? null) !== false) {
-                $validator->errors()->add('hasNext', 'The catalog response must be complete.');
-            }
-        });
+        $categoryResult =
+            $this
+                ->categorySynchronizationHandler
+                ->sync(
+                    $restaurant,
+                    $catalogItems,
+                );
+
+        $productResult =
+            $this
+                ->productSynchronizationHandler
+                ->sync(
+                    $restaurant,
+                    $catalogItems,
+                );
+
+        $deactivatedCount =
+            $this
+                ->productAvailabilityReconciler
+                ->deactivateMissing(
+                    $restaurant,
+                    $catalogItems,
+                );
+
+        $this->logs->markSucceeded(
+            $log,
+            [
+                'categories' => $categoryResult,
+
+                'products' => array_merge(
+                    $productResult->toArray(),
+                    [
+                        'deactivated' => $deactivatedCount,
+                    ],
+                ),
+            ],
+        );
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $catalog
+     */
+    private function validateCatalog(
+        array $catalog,
+    ): void {
+        $validator = Validator::make(
+            $catalog,
+            [
+                'items' => [
+                    'present',
+                    'array',
+                    'list',
+                ],
+
+                'hasNext' => [
+                    'required',
+                    'boolean',
+                ],
+            ],
+        );
+
+        $validator->after(
+            function (
+                $validator,
+            ) use ($catalog): void {
+                if (
+                    ($catalog['hasNext'] ?? null)
+                    !== false
+                ) {
+                    $validator
+                        ->errors()
+                        ->add(
+                            'hasNext',
+                            'The catalog response must be complete.',
+                        );
+                }
+            },
+        );
 
         $validator->validate();
     }
 
-    private function safeErrorMessage(Throwable $throwable): string
-    {
-        $message = $throwable->getMessage() !== ''
-            ? $throwable->getMessage()
-            : $throwable::class;
+    private function safeErrorMessage(
+        Throwable $throwable,
+    ): string {
+        $message =
+            $throwable->getMessage() !== ''
+                ? $throwable->getMessage()
+                : $throwable::class;
 
-        foreach ([
-            config('services.dots.token'),
-            config('services.dots.account_token'),
-            config('services.dots.auth_token'),
-        ] as $secret) {
-            if (is_string($secret) && $secret !== '') {
-                $message = str_replace($secret, '[REDACTED]', $message);
+        foreach (
+            [
+                config(
+                    'services.dots.token',
+                ),
+                config(
+                    'services.dots.account_token',
+                ),
+                config(
+                    'services.dots.auth_token',
+                ),
+            ]
+            as $secret
+        ) {
+            if (
+                is_string($secret)
+                && $secret !== ''
+            ) {
+                $message = str_replace(
+                    $secret,
+                    '[REDACTED]',
+                    $message,
+                );
             }
         }
 
-        return Str::limit($message, 2000, '');
+        return Str::limit(
+            $message,
+            2000,
+            '',
+        );
     }
 }

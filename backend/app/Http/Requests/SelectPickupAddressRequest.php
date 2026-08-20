@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SelectPickupAddressRequest extends FormRequest
@@ -23,13 +24,18 @@ class SelectPickupAddressRequest extends FormRequest
 
     public function restaurantAddressId(): int
     {
-        return (int) $this->validated('restaurant_address_id');
+        /** @var int|string $restaurantAddressId */
+        $restaurantAddressId = $this->validated('restaurant_address_id');
+
+        return (int) $restaurantAddressId;
     }
 
-    /** @return array<string, mixed> */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 
     public function sessionToken(): string

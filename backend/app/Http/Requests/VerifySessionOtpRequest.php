@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class VerifySessionOtpRequest extends FormRequest
@@ -31,13 +32,18 @@ class VerifySessionOtpRequest extends FormRequest
 
     public function code(): string
     {
-        return (string) $this->validated('code');
+        /** @var string $code */
+        $code = $this->validated('code');
+
+        return (string) $code;
     }
 
-    /** @return array<string, mixed> */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 
     public function sessionToken(): string

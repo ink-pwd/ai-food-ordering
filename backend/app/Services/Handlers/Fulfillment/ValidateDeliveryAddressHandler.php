@@ -2,6 +2,8 @@
 
 namespace App\Services\Handlers\Fulfillment;
 
+use App\DTO\DeliveryAddressValidationResultData;
+use App\DTO\SessionData;
 use App\Enums\FulfillmentType;
 use App\Integrations\Dots\FulfillmentApi;
 use App\Services\Repositories\CartRepository;
@@ -26,25 +28,24 @@ class ValidateDeliveryAddressHandler
         private readonly CartRepository $carts,
         private readonly SessionRepository $sessions,
         private readonly FulfillmentApi $fulfillmentApi,
-    ) {}
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
      * @param  array<string, mixed>  $address
-     * @return array{session: array<string, mixed>, delivery_available: bool, reason: string|null, delivery_price: mixed|null, dots_delivery_type: int|null}
      */
-    public function handle(string $plainToken, array $session, array $address): array
+    public function handle(string $plainToken, SessionData $session, array $address): DeliveryAddressValidationResultData
     {
         SessionSelection::assertPhoneVerified($session);
         $city = $this->resolveCity($session, $this->cities);
         $restaurant = $this->resolveRestaurant($session, $city, $this->restaurants);
-        FulfillmentSelection::assertMutable($this->carts, $restaurant, $session['id']);
+        FulfillmentSelection::assertMutable($this->carts, $restaurant, $session->id);
 
-        if (($session['fulfillment']['type'] ?? null) !== FulfillmentType::Delivery->value) {
+        if (($session->fulfillment['type'] ?? null) !== FulfillmentType::Delivery->value) {
             throw new ConflictHttpException('Delivery fulfillment must be selected.');
         }
 
-        $clearedFulfillment = array_merge($session['fulfillment'], [
+        $clearedFulfillment = array_merge($session->fulfillment, [
             'dots_delivery_type' => null,
             'delivery_price' => null,
             'delivery_address' => null,
@@ -58,16 +59,22 @@ class ValidateDeliveryAddressHandler
         ]));
         $this->validateAddressResponse($validatedAddress);
 
-        if (($validatedAddress['cityId'] ?? null) !== $city->external_city_id
-            || ($validatedAddress['inCityPolygon'] ?? null) !== true
-            || Arr::get($validatedAddress, 'position.latitude') === null
-            || Arr::get($validatedAddress, 'position.longitude') === null
+        if (
+            $this->isInvalidValidatedAddress(
+                $validatedAddress,
+                $city->external_city_id,
+            )
         ) {
             return $this->unavailable($plainToken, $clearedFulfillment, 'invalid_address');
         }
 
-        $latitude = (string) Arr::get($validatedAddress, 'position.latitude');
-        $longitude = (string) Arr::get($validatedAddress, 'position.longitude');
+        /** @var int|float|string $latitudeValue */
+        $latitudeValue = Arr::get($validatedAddress, 'position.latitude');
+        /** @var int|float|string $longitudeValue */
+        $longitudeValue = Arr::get($validatedAddress, 'position.longitude');
+
+        $latitude = (string) $latitudeValue;
+        $longitude = (string) $longitudeValue;
         $deliveryTypesResponse = $this->fulfillmentApi->getCompanyDeliveryTypes(
             $restaurant->external_company_id,
             $latitude,
@@ -80,8 +87,11 @@ class ValidateDeliveryAddressHandler
             return $this->unavailable($plainToken, $clearedFulfillment, 'outside_delivery_zone');
         }
 
+        /** @var int|string $dotsDeliveryType */
+        $dotsDeliveryType = $acceptedDeliveryType['type'];
+
         $fulfillment = array_merge($clearedFulfillment, [
-            'dots_delivery_type' => (int) $acceptedDeliveryType['type'],
+            'dots_delivery_type' => (int) $dotsDeliveryType,
             'delivery_price' => $acceptedDeliveryType['price'],
             'delivery_address' => [
                 'city_id' => $validatedAddress['cityId'],
@@ -103,13 +113,34 @@ class ValidateDeliveryAddressHandler
             throw new NotFoundHttpException;
         }
 
-        return [
-            'session' => $updatedSession,
-            'delivery_available' => true,
-            'reason' => null,
-            'delivery_price' => $acceptedDeliveryType['price'],
-            'dots_delivery_type' => (int) $acceptedDeliveryType['type'],
-        ];
+        return new DeliveryAddressValidationResultData(
+            session: SessionData::fromArray($updatedSession),
+            deliveryAvailable: true,
+            reason: null,
+            deliveryPrice: $acceptedDeliveryType['price'],
+            dotsDeliveryType: (int) $dotsDeliveryType,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $validatedAddress
+     */
+    private function isInvalidValidatedAddress(
+        array $validatedAddress,
+        string $externalCityId,
+    ): bool {
+        return ($validatedAddress['cityId'] ?? null)
+            !== $externalCityId
+            || ($validatedAddress['inCityPolygon'] ?? null)
+                !== true
+            || Arr::get(
+                $validatedAddress,
+                'position.latitude',
+            ) === null
+            || Arr::get(
+                $validatedAddress,
+                'position.longitude',
+            ) === null;
     }
 
     /** @param array<string, mixed> $response */
@@ -155,22 +186,24 @@ class ValidateDeliveryAddressHandler
 
     /**
      * @param  array<string, mixed>  $fulfillment
-     * @return array{session: array<string, mixed>, delivery_available: false, reason: string, delivery_price: null, dots_delivery_type: null}
      */
-    private function unavailable(string $plainToken, array $fulfillment, string $reason): array
-    {
+    private function unavailable(
+        string $plainToken,
+        array $fulfillment,
+        string $reason,
+    ): DeliveryAddressValidationResultData {
         $updatedSession = $this->sessions->updateFulfillment($plainToken, $fulfillment);
 
         if ($updatedSession === null) {
             throw new NotFoundHttpException;
         }
 
-        return [
-            'session' => $updatedSession,
-            'delivery_available' => false,
-            'reason' => $reason,
-            'delivery_price' => null,
-            'dots_delivery_type' => null,
-        ];
+        return new DeliveryAddressValidationResultData(
+            session: SessionData::fromArray($updatedSession),
+            deliveryAvailable: false,
+            reason: $reason,
+            deliveryPrice: null,
+            dotsDeliveryType: null,
+        );
     }
 }

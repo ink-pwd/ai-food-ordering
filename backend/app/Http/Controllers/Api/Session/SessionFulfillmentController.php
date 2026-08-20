@@ -9,8 +9,10 @@ use Illuminate\Http\JsonResponse;
 
 class SessionFulfillmentController extends Controller
 {
-    public function __invoke(SelectFulfillmentTypeRequest $request, SelectFulfillmentTypeHandler $selectFulfillment): JsonResponse
-    {
+    public function __invoke(
+        SelectFulfillmentTypeRequest $request,
+        SelectFulfillmentTypeHandler $selectFulfillment,
+    ): JsonResponse {
         $session = $selectFulfillment->handle(
             $request->sessionToken(),
             $request->internalSession(),
@@ -19,8 +21,8 @@ class SessionFulfillmentController extends Controller
 
         return response()->json([
             'data' => [
-                'session_id' => $session['id'],
-                'fulfillment' => $session['fulfillment'],
+                'session_id' => $session->id,
+                'fulfillment' => $session->fulfillment,
             ],
         ]);
     }

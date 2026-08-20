@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SelectSessionRestaurantRequest extends FormRequest
@@ -31,15 +32,18 @@ class SelectSessionRestaurantRequest extends FormRequest
 
     public function restaurantId(): int
     {
-        return (int) $this->validated('restaurant_id');
+        /** @var int|string $restaurantId */
+        $restaurantId = $this->validated('restaurant_id');
+
+        return (int) $restaurantId;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 
     public function sessionToken(): string

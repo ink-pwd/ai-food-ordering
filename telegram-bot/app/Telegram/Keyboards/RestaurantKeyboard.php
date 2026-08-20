@@ -2,13 +2,14 @@
 
 namespace App\Telegram\Keyboards;
 
+use App\DTO\OrderingBackend\RestaurantData;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 final class RestaurantKeyboard
 {
     /**
-     * @param  list<array{id: int, name: string}>  $restaurants
+     * @param  list<RestaurantData>  $restaurants
      */
     public function make(array $restaurants): InlineKeyboardMarkup
     {
@@ -16,8 +17,8 @@ final class RestaurantKeyboard
 
         foreach ($restaurants as $restaurant) {
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: "🍽 {$restaurant['name']}",
-                callback_data: "restaurant:{$restaurant['id']}",
+                text: "🍽 {$restaurant->name}",
+                callback_data: "restaurant:{$restaurant->id}",
             ));
         }
 

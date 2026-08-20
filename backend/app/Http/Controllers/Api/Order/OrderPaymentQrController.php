@@ -2,23 +2,26 @@
 
 namespace App\Http\Controllers\Api\Order;
 
+use App\DTO\SessionData;
 use App\Http\Controllers\Controller;
+use App\Services\Handlers\Order\FindCurrentOrderHandler;
 use App\Services\Handlers\Order\ResolveOrderPaymentQrHandler;
-use App\Services\Repositories\OrderRepository;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class OrderPaymentQrController extends Controller
 {
-    public function __invoke(Request $request, OrderRepository $orders, ResolveOrderPaymentQrHandler $paymentQr): Response
-    {
+    public function __invoke(
+        Request $request,
+        FindCurrentOrderHandler $findCurrentOrderHandler,
+        ResolveOrderPaymentQrHandler $paymentQr,
+    ): Response {
+        /** @var SessionData $session */
         $session = $request->attributes->get('internal_session');
-        $order = $orders->findCurrentForSession($session['id']);
 
-        if ($order === null) {
-            throw new NotFoundHttpException('Order was not found.');
-        }
+        $order = $findCurrentOrderHandler->handle(
+            $session->id,
+        );
 
         if ($order->payment_checkout_url === null) {
             return response()->json([

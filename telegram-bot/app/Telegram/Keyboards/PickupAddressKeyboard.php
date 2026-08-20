@@ -2,13 +2,14 @@
 
 namespace App\Telegram\Keyboards;
 
+use App\DTO\OrderingBackend\PickupAddressData;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 final class PickupAddressKeyboard
 {
     /**
-     * @param  list<array{id: int, title: ?string}>  $addresses
+     * @param  list<PickupAddressData>  $addresses
      */
     public function make(array $addresses, string $context): InlineKeyboardMarkup
     {
@@ -17,7 +18,7 @@ final class PickupAddressKeyboard
         foreach ($addresses as $address) {
             $keyboard->addRow(InlineKeyboardButton::make(
                 text: '📍 '.$this->caption($address),
-                callback_data: "pickup:{$address['id']}:{$context}",
+                callback_data: "pickup:{$address->id}:{$context}",
             ));
         }
 
@@ -27,15 +28,15 @@ final class PickupAddressKeyboard
         ));
     }
 
-    /**
-     * @param  array{id: int, title: ?string}  $address
-     */
-    private function caption(array $address): string
+    private function caption(PickupAddressData $address): string
     {
-        if (is_string($address['title']) && trim($address['title']) !== '') {
-            return $address['title'];
+        if (
+            is_string($address->title)
+            && trim($address->title) !== ''
+        ) {
+            return $address->title;
         }
 
-        return "Точка самовивозу #{$address['id']}";
+        return "Точка самовивозу #{$address->id}";
     }
 }

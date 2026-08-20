@@ -4,21 +4,20 @@ namespace App\Http\Controllers\Api\Restaurant;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
-use App\Models\Restaurant;
+use App\Services\Handlers\Restaurant\ShowRestaurantProductHandler;
 
 class RestaurantProductController extends Controller
 {
-    public function show(string $restaurant, string $product): ProductResource
-    {
-        $resolvedRestaurant = Restaurant::query()
-            ->where('slug', $restaurant)
-            ->where('is_active', true)
-            ->firstOrFail();
-
-        $resolvedProduct = $resolvedRestaurant->products()
-            ->whereKey($product)
-            ->firstOrFail();
-
-        return new ProductResource($resolvedProduct);
+    public function show(
+        ShowRestaurantProductHandler $showRestaurantProductHandler,
+        string $restaurantSlug,
+        string $productId,
+    ): ProductResource {
+        return new ProductResource(
+            $showRestaurantProductHandler->handle(
+                $restaurantSlug,
+                $productId,
+            ),
+        );
     }
 }

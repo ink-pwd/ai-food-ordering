@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\SessionData;
 use App\Models\City;
 use App\Services\Repositories\CityRepository;
 use App\Services\Repositories\SessionRepository;
@@ -14,17 +15,20 @@ class SelectSessionCityHandler
     public function __construct(
         private readonly CityRepository $cities,
         private readonly SessionRepository $sessions,
-    ) {}
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
-     * @return array{session: array<string, mixed>, city: City}
+     * @return array{session: SessionData, city: City}
      */
-    public function handle(string $plainToken, array $session, int $cityId): array
-    {
+    public function handle(
+        string $plainToken,
+        SessionData $session,
+        int $cityId,
+    ): array {
         SessionSelection::assertPhoneVerified($session);
 
-        if (($session['city_id'] ?? null) !== null || ($session['restaurant_id'] ?? null) !== null) {
+        if (($session->cityId) !== null || ($session->restaurantId) !== null) {
             throw new ConflictHttpException('City has already been selected.');
         }
 
@@ -41,7 +45,7 @@ class SelectSessionCityHandler
         }
 
         return [
-            'session' => $updatedSession,
+            'session' => SessionData::fromArray($updatedSession),
             'city' => $city,
         ];
     }

@@ -10,8 +10,10 @@ use Illuminate\Http\JsonResponse;
 
 class SessionRestaurantController extends Controller
 {
-    public function __invoke(SelectSessionRestaurantRequest $request, SelectSessionRestaurantHandler $selectRestaurant): JsonResponse
-    {
+    public function __invoke(
+        SelectSessionRestaurantRequest $request,
+        SelectSessionRestaurantHandler $selectRestaurant,
+    ): JsonResponse {
         $result = $selectRestaurant->handle(
             $request->sessionToken(),
             $request->internalSession(),
@@ -20,7 +22,7 @@ class SessionRestaurantController extends Controller
 
         return response()->json([
             'data' => [
-                'session_id' => $result['session']['id'],
+                'session_id' => $result['session']->id,
                 'restaurant' => (new RestaurantResource($result['restaurant']))->resolve($request),
             ],
         ]);

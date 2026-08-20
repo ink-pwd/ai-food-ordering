@@ -5,19 +5,26 @@ namespace App\Services\Reconcilers;
 use App\Models\Restaurant;
 use App\Services\Repositories\ProductRepository;
 
-class ProductAvailabilityReconciler
+readonly class ProductAvailabilityReconciler
 {
     public function __construct(
-        private readonly ProductRepository $products,
-    ) {}
+        private ProductRepository $products,
+    ) {
+    }
 
     /**
-     * @param  array<int, array{id?: string, items?: array<int, array{id?: string}>}>  $categories
+     * @param  array<int, array<string, mixed>>  $categories
      */
     public function deactivateMissing(Restaurant $restaurant, array $categories): int
     {
+        /** @var array<int, string> $presentProductIds */
         $presentProductIds = collect($categories)
-            ->flatMap(fn (array $category): array => $category['items'] ?? [])
+            ->flatMap(static function (array $category): array {
+                /** @var array<int, array<string, mixed>> $items */
+                $items = $category['items'] ?? [];
+
+                return $items;
+            })
             ->pluck('id')
             ->filter()
             ->values()

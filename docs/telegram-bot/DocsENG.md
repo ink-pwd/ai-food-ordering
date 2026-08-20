@@ -1,550 +1,440 @@
-# Telegram Bot Service Overview
+# AI Food Ordering — Telegram Bot — Developer Documentation
 
-## English
+## 1. Purpose and architecture
 
-### What this service is
-
-`telegram-bot` is the Laravel service that implements the Telegram interface for the AI Food Ordering system through Nutgram.
-
-The service receives Telegram commands, contacts, and callback queries, builds keyboards and messages, and translates user actions into requests to the internal Ordering Backend REST API.
+Telegram Bot is a thin Laravel/Nutgram client for the ordering backend service.
 
 ```text
-Telegram User
-    ↓
-Telegram Bot
-    ↓
-Laravel telegram-bot service
-    ↓
-AI Food Ordering Backend REST API
-    ↓
-Dots
+Telegram user -> Telegram bot -> Backend REST API -> Dots
 ```
 
-The Telegram service never communicates with Dots directly. The Ordering Backend isolates Telegram from the external API and remains the only food-ordering business-logic layer.
+The Telegram service owns the Telegram presentation layer: messages, buttons, callbacks, and forwarding user actions to the backend. The backend owns business logic and state. Telegram Bot never calls Dots directly.
 
----
+The Telegram user interface is Ukrainian only. This document is English developer documentation.
 
-### Responsibility boundary
+## 2. Service boundaries
 
-The Telegram service is responsible for:
+Telegram Bot does:
 
-* the `/start` command and Telegram callbacks;
-* inline and reply keyboards;
-* collecting a contact through Telegram;
-* formatting categories, products, carts, and orders;
-* forwarding user actions to the Ordering Backend;
-* safe navigation without locally stored screen state;
-* backend session recovery and returning users to contact onboarding;
-* safe callback acknowledgement and message editing.
+- creates/reuses a backend session token;
+- sends contact/OTP/city/restaurant/fulfillment/cart/order/payment actions to the backend;
+- renders backend responses in Telegram;
+- uploads backend-generated QR PNG bytes to Telegram.
 
-The Telegram service is not responsible for:
+The backend does:
 
-* catalog truth or product availability;
-* prices, promotions, line totals, subtotals, or totals;
-* restaurant selection or restaurant lifecycle;
-* cart creation, storage, or lifecycle rules;
-* persistent contact storage;
-* Dots identifiers;
-* receiving and payment settings, apart from the allowed `delivery_time` input;
-* final order totals or order status;
-* communication with Dots.
+- stores session/contact/city/restaurant/fulfillment/cart/order/payment state;
+- validates and normalizes phone numbers;
+- verifies OTP codes;
+- validates delivery address, zone, and price;
+- creates orders and payments;
+- gets payment checkout URLs;
+- generates QR through its own endpoint;
+- integrates with Dots.
 
-These data and rules belong to the Ordering Backend. Telegram only renders normalized backend responses and submits an allowed user intent.
-
----
-
-### Architecture
-
-The main callback path is:
-
-```text
-Telegram callback
-    ↓
-CallbackAcknowledger
-    ↓
-CatalogHandler / CartHandler / CheckoutHandler
-    ↓
-TelegramSessionRecovery for session-bound requests
-    ↓
-OrderingBackendClient
-    ↓
-Ordering Backend REST API
-```
-
-Components have separate responsibilities:
-
-* handlers coordinate user flows and remain thin;
-* keyboard classes build callback data and Telegram markup;
-* formatter classes build text only from normalized backend data;
-* `OrderingBackendClient` contains every HTTP request, header, timeout, and response validation rule;
-* `TelegramSessionManager`, `TelegramSessionStore`, and `TelegramSessionRecovery` manage the only local runtime value: the backend session token;
-* `CallbackAcknowledger` stops stale callbacks before business operations;
-* `TelegramMessageEditor` centralizes idempotent inline-message editing.
-
-There are no catalog, cart, or order repositories or local models because Telegram does not store that data.
-
----
-
-### Main user flow
+## 3. Complete user flow
 
 ```text
 /start
-  ↓
-Backend session
-  ↓
-Share contact
-  ↓
-Main menu
-  ├── Catalog
-  │     ↓
-  │   Category
-  │     ↓
-  │   Product
-  │     ↓
-  │   Add to cart
-  └── Cart
-        ↓
-      Checkout
-        ↓
-      Order confirmation
-        ↓
-      Result / status refresh
+  -> share contact
+  -> OTP code
+  -> choose city
+  -> choose restaurant
+  -> choose fulfillment method
+     -> delivery: address type -> ForceReply address -> backend validation
+     OR
+     -> pickup: pickup address selection
+  -> main menu
+  -> catalog -> category -> product
+  -> cart
+  -> checkout confirmation
+  -> POST /api/orders
+  -> order/payment screen
+  -> payment URL button
+  -> backend QR PNG when available
+  -> manual order/payment refresh
+  -> /exit or 🚪 Вийти
 ```
 
-The main menu contains only the implemented `🍕 Каталог` and `🛒 Корзина` actions.
+A full automated E2E test for this path is intentionally not maintained. The full path is verified manually against real services.
 
----
+## 4. Backend session lifecycle
 
-### Telegram routes and callbacks
+`/start` calls `POST /api/sessions` through `OrderingBackendClient::createTelegramSession()`.
 
-Nutgram loads `routes/telegram.php`, which registers:
-
-| Telegram data | Purpose |
-| --- | --- |
-| `/start` | Create or reuse a backend session and request the contact. |
-| Telegram contact | Verify contact ownership and submit it to the backend. |
-| `catalog` | Display categories. |
-| `category:{categoryId}` | Display products from a backend category. |
-| `product:{categoryId}:{productId}` | Display a product; the category ID is retained for back navigation. |
-| `main_menu` | Return to the main menu without a backend request. |
-| `menu:cart` | Get or create the current active cart. |
-| `cart:add:{productId}` | Add a backend product or increment an existing item. |
-| `cart:inc:{itemId}` / `cart:dec:{itemId}` | Change a backend cart item's quantity. |
-| `cart:remove:{itemId}` | Remove a backend cart item. |
-| `cart:clear` | Display clear confirmation without a mutation. |
-| `cart:clear:confirm` / `cart:clear:cancel` | Confirm clearing or return to the authoritative cart. |
-| `cart:noop:{itemId}` | Acknowledge an informational quantity/name button without mutation. |
-| `checkout` | Validate the current cart and show order confirmation. |
-| `order:confirm:{uuid}` | Create or resolve an idempotent order. |
-| `order:cancel` | Return to the authoritative cart without creating an order. |
-| `order:refresh` | Retrieve the current order from the backend. |
-
-Navigation context is carried in callback data. The selected category, product, cart item, clear confirmation, and checkout state are not stored locally.
-
----
-
-### Ordering Backend integration
-
-Every HTTP call is contained in `OrderingBackendClient`. Every request receives `X-Internal-Api-Token`; session-bound requests additionally receive `X-Session-Token`; order creation also receives `Idempotency-Key`.
-
-The current contract used by the Telegram service is:
-
-| Method and endpoint | Usage |
-| --- | --- |
-| `POST /api/sessions` | Create or resolve a Telegram backend session. |
-| `PUT /api/sessions/current/contact` | Store the current session's name and phone. |
-| `GET /api/restaurants/{restaurant}/categories` | Retrieve categories for the configured restaurant. |
-| `GET /api/restaurants/{restaurant}/categories/{category}/products` | Retrieve category products. |
-| `GET /api/restaurants/{restaurant}/products/{product}` | Retrieve a product card. |
-| `POST /api/carts` | Ensure the current active cart exists. |
-| `GET /api/carts/current` | Retrieve the authoritative current cart. |
-| `POST /api/carts/current/items` | Add a product with quantity `1`. |
-| `PATCH /api/carts/current/items/{item}` | Change a cart item's quantity. |
-| `DELETE /api/carts/current/items/{item}` | Remove a cart item. |
-| `DELETE /api/carts/current/items` | Clear the cart. |
-| `POST /api/orders` | Create or retrieve an order by idempotency key. |
-| `GET /api/orders/current` | Retrieve the authoritative current order. |
-
-The URL, internal API token, restaurant slug, and timeout are read through `config('services.ordering_backend.*')`.
-
-The client unwraps the single top-level `data` object, normalizes flat cart/order items, and validates required types and fields. A successful but malformed response is an integration failure rather than an empty catalog or cart.
-
-Catalog endpoints do not use `X-Session-Token`. Contact, cart, and order endpoints are session-bound.
-
----
-
-### Session lifecycle
-
-The `/start` flow is:
+The backend returns `session_token`. Telegram Bot stores only this mapping:
 
 ```text
-Telegram chat
-    ↓
-telegram-chat-{chat_id}
-    ↓
-POST /api/sessions
-    ↓
-data.session_token
-    ↓
-TelegramSessionStore
+telegram-chat-{chatId} -> X-Session-Token
 ```
 
-The stable external session ID has this format:
+The store is an in-memory service in the current PHP process. Restarting `nutgram:run` can lose the token map. That is expected for this prototype.
+
+On 401, `TelegramSessionRecovery` creates a new backend session and returns the user to contact onboarding. Interrupted write operations are not retried automatically.
+
+## 5. Contact + OTP
+
+A Telegram contact is accepted only when `contact.user_id` matches the sender's Telegram user id. The phone number is sent to the backend contact API without Telegram-specific country validation:
+
+```http
+PUT /api/sessions/current/contact
+```
+
+The backend remains the authoritative validator. After a successful contact update, the bot calls:
+
+```http
+POST /api/sessions/current/otp
+```
+
+The user enters the code as normal text. The numeric `onText {code}` route calls:
+
+```http
+POST /api/sessions/current/otp/verify
+```
+
+After successful verification, the bot shows city selection.
+
+## 6. Phone normalization
+
+Phone normalization lives in backend `UpdateSessionContactRequest`.
+
+Generic E.164-style international `+` format is accepted:
 
 ```text
-telegram-chat-{chat_id}
++[country code + subscriber digits]
 ```
 
-`TelegramSessionManager` checks the in-memory store first. If a token already exists, it does not make another backend request. If the token is missing, the manager calls the backend and stores the returned token in the singleton `TelegramSessionStore` for the current PHP process.
-
-`TelegramSessionRecovery` provides centralized recovery for session-bound actions.
-
-When the token is missing:
-
-1. a backend session is created or resolved;
-2. contact onboarding is shown again;
-3. the original action stops.
-
-When the backend returns `401`:
-
-1. the stale token is removed from process memory;
-2. a new backend session is created or resolved;
-3. the contact-sharing button is shown;
-4. the interrupted operation is not retried automatically.
-
-If replacement-session creation is unavailable, the user receives a safe temporary-failure message with the same contact keyboard.
-
-In particular, PATCH, DELETE, and `POST /api/orders` are never blindly repeated after session recovery.
-
----
-
-### Contact onboarding
-
-After a successful `/start`, the user receives a reply keyboard containing:
+Required valid examples:
 
 ```text
-📱 Поделиться контактом
++380931234567
++34123456789
++14155552671
 ```
 
-The button uses Telegram `request_contact=true`.
-
-Before a backend request, the handler verifies:
+Automatic no-plus normalization supports unambiguous prefixes:
 
 ```text
-message.contact.user_id == message.from.id
+380931234567 -> +380931234567
+34123456789  -> +34123456789
+14155552671  -> +14155552671
 ```
 
-A foreign or unowned Telegram contact is rejected without calling the backend.
-
-For the user's own contact, Telegram combines `first_name` and `last_name`, normalizes whitespace, and submits only:
-
-```json
-{
-  "name": "...",
-  "phone": "..."
-}
-```
-
-Telegram does not submit or set `phone_verified`. Contact normalization, storage, and the backend contact representation belong to the Ordering Backend.
-
-The main menu is shown only after a successful backend response. A `422` asks the user to check the phone safely; a `401` starts session recovery; transport and malformed-response details are not exposed.
-
----
-
-### Catalog
-
-Catalog browsing does not require a backend session token:
+`00` international prefix normalizes to `+`:
 
 ```text
-catalog
-  ↓
-Categories
-  ↓ category:{categoryId}
-Category products
-  ↓ product:{categoryId}:{productId}
-Product card
+00380931234567 -> +380931234567
+0034123456789  -> +34123456789
+0014155552671  -> +14155552671
 ```
 
-Categories, products, descriptions, prices, promotion prices, currencies, and availability come exclusively from the Ordering Backend.
-
-The product list displays `promotion_price` when the backend returns a non-null value; otherwise it uses `price`. Telegram performs no price calculation.
-
-The product card is text-only and displays the available normalized backend fields. Telegram does not download or send a product image.
-
-Category and product callbacks contain local backend IDs. The category ID in a product callback exists only to reconstruct the back button; the selected category is not stored.
-
-An empty category or product list is rendered as a valid empty state. `404`, malformed responses, and transport failures are mapped to safe messages.
-
----
-
-### Cart
-
-The Ordering Backend is the only source of cart state.
-
-Opening the cart performs:
+Ukrainian local format is preserved:
 
 ```text
-POST /api/carts
-    ↓
-GET /api/carts/current
-    ↓
-Render authoritative cart
+0931234567 -> +380931234567
 ```
 
-`POST /api/carts` is the backend-owned get-or-create operation for the active cart. Telegram then reads `GET /api/carts/current` for authoritative items and totals.
-
-#### Adding a product
-
-`cart:add:{productId}` contains a backend product ID.
-
-1. Telegram ensures an active cart and retrieves its current state.
-2. It finds an existing item using `item.product_id == productId`.
-3. If no item exists, it sends `POST /api/carts/current/items` with `product_id` and `quantity: 1`.
-4. If an item exists, Telegram uses that cart item's `id` and PATCHes the current backend quantity plus one.
-5. It renders the cart response returned by the backend.
-
-#### Updating and removing items
-
-The identifier distinction is important:
-
-* `product_id` identifies a product when adding it;
-* `item.id` identifies an existing cart item for PATCH and DELETE.
-
-The `cart:inc:{itemId}`, `cart:dec:{itemId}`, and `cart:remove:{itemId}` callbacks contain the cart-item ID.
-
-Before increment, decrement, or explicit removal, Telegram retrieves a fresh cart and finds the item by `item.id`. Quantity is not stored in callback data or process memory.
-
-When quantity is greater than `1`, decrement PATCHes the current backend quantity minus one. When quantity equals `1`, decrement deletes the item and never sends quantity `0`.
-
-After deleting one item and after clearing all items, `OrderingBackendClient` retrieves the authoritative cart through `GET /api/carts/current`. Telegram never constructs a deletion result locally.
-
-Cart clearing is a two-step flow:
+Spaces, hyphens, and parentheses are stripped:
 
 ```text
-cart:clear
-  ↓ no mutation
-Confirmation keyboard
-  ├── cart:clear:confirm → DELETE all → GET current cart
-  └── cart:clear:cancel  → GET current cart without mutation
++380 (93) 123-45-67 -> +380931234567
++34 612 34 56 78    -> +34612345678
++1 (415) 555-2671   -> +14155552671
 ```
 
-Confirmation state is not stored; the choice is represented entirely by callback data.
+Ambiguous local numbers are not blindly converted to international numbers.
 
-Telegram displays backend `unit_price`, line `total`, `subtotal`, total, and currency without recalculation. An empty cart does not contain update, remove, clear, or checkout buttons.
+## 7. City/restaurant immutability
 
-#### Cart lifecycle after checkout
+City and restaurant are selected through backend session endpoints. If the backend returns a conflict for a repeated selection, the bot does not create a new session and safely continues to the next step.
 
-After successful checkout, the backend moves the old cart to historical `checked_out` state. Telegram then calls `POST /api/carts` so the backend can create or return the next active cart.
+Further callbacks carry the backend-local `restaurantId`, not the restaurant slug.
 
-Telegram never clears, reactivates, or modifies historical carts. Normal cart opening uses the same get-or-create operation as defensive recovery if post-order initialization previously failed.
+## 8. Exit semantics
 
----
+`/exit` and callback `exit` try to call:
 
-### Checkout and order creation
+```http
+DELETE /api/sessions/current
+```
 
-Checkout is available only for a non-empty cart with `active` status.
+Then the local token is forgotten, a new backend session is created, and the user returns to contact onboarding. Exit does not cancel an already-created backend/Dots order.
+
+## 9. Fulfillment
+
+### Delivery
+
+Callbacks:
 
 ```text
-Cart
-  ↓ checkout
-GET /api/carts/current
-  ↓
-Checkout confirmation
-  ↓ order:confirm:{uuid}
+fulfillment:delivery:{restaurantId}:{fp}
+delivery:type:{type}:{restaurantId}:{fp}
+delivery:retry:{restaurantId}:{fp}
+```
+
+Address types:
+
+```text
+0 — 🏢 Квартира
+1 — 🏠 Приватний будинок
+2 — 🏢 Офіс
+3 — 📍 Інше
+```
+
+After type selection, the bot sends a ForceReply with marker:
+
+```text
+#delivery-address:{type}:{restaurantId}:{fp}
+```
+
+The marker makes address handling stateless. The bot does not store an address draft locally.
+
+The address is parsed as comma-separated input:
+
+```text
+Вулиця, будинок, квартира
+```
+
+The backend receives:
+
+```http
+POST /api/sessions/current/delivery-address
+```
+
+and returns availability, reason, delivery price, Dots delivery type, and fulfillment. The bot shows Ukrainian feedback for available delivery, price, invalid address, or outside delivery zone.
+
+### Pickup
+
+Callbacks:
+
+```text
+fulfillment:pickup:{restaurantId}:{fp}
+pickup:{restaurantAddressId}:{restaurantId}:{fp}
+```
+
+The bot gets pickup addresses from the backend and saves the selected address through the backend endpoint. Pickup state is not stored locally.
+
+## 10. Restaurant navigation context
+
+Callback context:
+
+```text
+{restaurantId}:{fingerprint}
+```
+
+`fingerprint` is the first 12 characters of SHA-256 over the current backend session token. It is stale-callback protection, not a secret and not standalone authorization.
+
+Every session-bound callback validates the fingerprint against the current token and, where needed, checks that the restaurant belongs to the current session through the backend restaurants endpoint.
+
+## 11. Callback formats
+
+Main formats:
+
+```text
+otp:resend
+exit
+city:{cityId}
+restaurant:{restaurantId}
+fulfillment:menu:{restaurantId}:{fp}
+fulfillment:delivery:{restaurantId}:{fp}
+fulfillment:pickup:{restaurantId}:{fp}
+delivery:retry:{restaurantId}:{fp}
+delivery:type:{type}:{restaurantId}:{fp}
+pickup:{restaurantAddressId}:{restaurantId}:{fp}
+catalog:{restaurantId}:{fp}
+category:{categoryId}:{restaurantId}:{fp}
+product:{categoryId}:{productId}:{restaurantId}:{fp}
+main_menu:{restaurantId}:{fp}
+menu:cart:{restaurantId}:{fp}
+cart:add:{productId}:{restaurantId}:{fp}
+cart:inc:{itemId}:{restaurantId}:{fp}
+cart:dec:{itemId}:{restaurantId}:{fp}
+cart:remove:{itemId}:{restaurantId}:{fp}
+cart:clear:{restaurantId}:{fp}
+cart:clear:confirm:{restaurantId}:{fp}
+cart:clear:cancel:{restaurantId}:{fp}
+cart:noop:{itemId}:{restaurantId}:{fp}
+checkout:{restaurantId}:{fp}
+oc:{uuid}:{restaurantId}:{fp}
+order:cancel:{restaurantId}:{fp}
+order:refresh:{restaurantId}:{fp}
+payment:refresh:{restaurantId}:{fp}
+```
+
+`oc:` replaces long `order:confirm:` so Telegram `callback_data` remains within 64 bytes.
+
+## 12. Catalog
+
+Catalog callbacks validate current restaurant context, get restaurant slug from backend current session restaurants, then call backend catalog endpoints with the internal API token. The slug is not stored in callback data.
+
+## 13. Cart
+
+Cart operations are session-bound and context-aware. Mutations run exactly once after successful callback acknowledgement. After delete/clear, the backend client loads the authoritative current cart.
+
+Telegram does not calculate prices or totals locally.
+
+## 14. Checkout
+
+Checkout loads the current cart, shows backend totals, and creates a UUID idempotency key exactly once when generating the confirmation keyboard.
+
+Buttons:
+
+```text
+✅ Підтвердити -> oc:{uuid}:{restaurantId}:{fp}
+❌ Скасувати  -> order:cancel:{restaurantId}:{fp}
+```
+
+Cancel is pre-submit return-to-cart only. It does not cancel an already-created backend/Dots order.
+
+## 15. Idempotency key
+
+The UUID from the confirmation callback is passed unchanged to:
+
+```http
 POST /api/orders
-  ↓
-Ordering Backend
-  ↓
-Dots
-  ↓
-Order response
+Idempotency-Key: {uuid}
 ```
 
-The confirmation screen uses backend `total` and `currency`. The current MVP displays:
+`confirm()` does not generate a new UUID and does not automatically retry POST after 401 recovery or ambiguous failure.
 
-* pickup;
-* cash payment;
-* as-soon-as-possible time.
+## 16. Order states
 
-Telegram does not submit a receiving type or payment type. The only JSON input on confirmation is:
+- `creating`: `⏳ Замовлення створюється.` and button `🔄 Оновити замовлення`.
+- `created`: `✅ Замовлення створено.` and transition to payment state.
+- `failed`: `❌ Не вдалося створити замовлення.`.
 
-```json
-{
-  "delivery_time": 0
-}
-```
+After successful createOrder, the bot does not call ensureNextCart/ensureCurrentCart for a next cart. The user stays in the order/payment flow.
 
-The value `0` means ASAP in the current backend contract.
+## 17. Online payment
 
-#### Idempotency
-
-When building the confirmation keyboard, Telegram generates a UUID and places it directly into:
+Payment refresh:
 
 ```text
-order:confirm:{uuid}
+payment:refresh:{restaurantId}:{fp}
 ```
 
-The key is not stored in a database, Redis, cache, or process state. The confirm handler validates the UUID and forwards it unchanged in the `Idempotency-Key` header.
+It is a read-only GET-style operation. It never creates an order, generates an idempotency key, or mutates the cart.
 
-Handling the same button again forwards the same key. Duplicate-order protection belongs to backend idempotency; Telegram does not generate a new key inside the confirm handler.
+## 18. Pending / ready / received
 
-#### Successful order
+- `pending` or HTTP 202: `⏳ Платіжні дані ще готуються.` and `🔄 Оновити оплату`.
+- `ready` + trusted HTTPS checkout URL: `💳 Оплата готова.` and URL button `💳 Оплатити`.
+- `ready` does not mean paid.
+- Only `payment_received_at != null` shows `✅ Оплату отримано.`.
 
-Responses `200` and `201` are successful. After a confirmed successful response, Telegram:
+Checkout URL is only a Telegram URL button, never callback data.
 
-1. holds the order response only in a local variable for the current invocation;
-2. calls `POST /api/carts` with the same session token for the next active cart;
-3. renders the original authoritative order response.
+## 19. QR behavior
 
-If next-cart initialization fails, the successful order is still rendered. `POST /api/orders` is not repeated; normal cart opening can retry the safe backend get-or-create operation later.
+QR is loaded only from the backend:
 
-#### Rejected or ambiguous order
-
-A `401` starts session recovery, does not retry the order, and does not ensure a new cart.
-
-After a timeout, connection failure, or another ambiguous result, Telegram does not retry `POST /api/orders`, does not create the next cart, and offers a current-order check through `GET /api/orders/current`.
-
-Definite `404`, `409`, and `422` responses receive separate safe messages and actions. A rejected order also does not trigger post-order cart ensure.
-
----
-
-### Order status
-
-The order response is normalized from backend-provided fields:
-
-* local order ID;
-* status;
-* receiving type;
-* total and currency;
-* items with name, quantity, unit price, and total.
-
-Telegram does not calculate order-item values or create an independent order lifecycle.
-
-Known backend statuses, including `creating`, `created`, `failed`, `paid`, and `cancelled`, are displayed with readable Russian labels. An unknown status remains the original backend value.
-
-For `creating`, Telegram shows:
-
-```text
-🔄 Обновить статус
+```http
+GET /api/orders/current/payment/qr
 ```
 
-The refresh flow is:
+Backend ready response: HTTP 200 `image/png` raw bytes. Telegram Bot sends them through Nutgram `sendPhoto()` with an ephemeral `php://temp` stream.
 
-```text
-order:refresh
-  ↓
-GET /api/orders/current
-  ↓
-Render authoritative order
+Backend pending response: HTTP 202 JSON. This is not an error; the bot says QR is still being prepared.
+
+If checkout URL is valid but QR is temporarily unavailable, the bot keeps `💳 Оплатити` available and shows a safe warning.
+
+Telegram Bot does not generate QR locally and does not persist it.
+
+## 20. Session recovery / 401
+
+On 401, session-bound handlers use `TelegramSessionRecovery`. Recovery returns the user to contact onboarding. Interrupted write operations are not retried automatically.
+
+## 21. Errors and status handling
+
+Callback handlers call `CallbackAcknowledger` exactly once before backend work. Stale/expired callback queries safely stop the handler before backend mutation. Unexpected Telegram exceptions are not swallowed.
+
+Backend validation details are not displayed directly. User-facing errors are Ukrainian and safe.
+
+## 22. Localization and emoji rules
+
+Telegram UI is Ukrainian only. Every visible button has an emoji. Backend names/content are data and are not translated.
+
+## 23. Security
+
+Callback data does not contain:
+
+- backend `X-Session-Token`;
+- `X-Internal-Api-Token`;
+- checkout URL;
+- QR bytes;
+- Dots credentials;
+- full address JSON;
+- coordinates;
+- payment secrets.
+
+Fingerprint protects against stale context but does not replace backend session authorization. The backend remains authoritative.
+
+## 24. Local state / persistence policy
+
+Telegram Bot does not locally store:
+
+- city;
+- restaurant;
+- fulfillment;
+- address;
+- cart;
+- order;
+- payment;
+- QR;
+- idempotency key.
+
+There are no Telegram business DB models, Redis/cache business state, or local price caches.
+
+## 25. Configuration
+
+Main variables in `telegram-bot/.env.example`:
+
+```env
+TELEGRAM_BOT_TOKEN=
+BACKEND_URL=http://app
+BACKEND_INTERNAL_API_TOKEN=
+BACKEND_TIMEOUT=10
+CACHE_STORE=array
 ```
 
-Automatic order-status polling is not implemented.
+Secrets must not be committed.
 
-The backend `failure_message` is not rendered directly. A failed order uses a safe generic message.
+## 26. Local development / run commands
 
----
+From repository root:
 
-### Runtime state
-
-`TelegramSessionStore` is registered as a Laravel singleton and contains a map:
-
-```text
-telegram-chat-{chat_id} → X-Session-Token
+```bash
+cp telegram-bot/.env.example telegram-bot/.env
+docker compose up -d
+docker compose exec --user "$(id -u):$(id -g)" telegram-bot composer install
+docker compose exec --user "$(id -u):$(id -g)" telegram-bot php artisan key:generate
+docker compose exec telegram-bot php artisan nutgram:run
 ```
 
-The map exists only in the memory of the current long-running PHP polling process.
+Check handlers:
 
-The Telegram service does not locally store:
-
-* users or contacts;
-* categories or products;
-* the selected screen, category, or product;
-* cart IDs, items, quantities, or totals;
-* clear confirmation;
-* a checkout snapshot;
-* order IDs, statuses, or idempotency keys.
-
-`CACHE_STORE=array` also keeps Laravel/Nutgram cache inside the process. This is the intentional stateless prototype design. Restarting the process loses the process-memory token, and a user may be returned to contact onboarding.
-
-The authoritative state remains in the Ordering Backend.
-
----
-
-### Error handling
-
-`OrderingBackendClient` maps HTTP and connection failures to `OrderingBackendException` with a safe internal message and, for HTTP failures, a status code.
-
-Important categories are:
-
-* session-bound `401` — forget the token, create or resolve a session, show contact onboarding, and stop the original operation;
-* `404` — show a safe missing-cart, missing-item, missing-resource, or missing-current-order message;
-* `409` — show a safe conflict or changed-state message;
-* `422` — show a safe validation or checkout message;
-* timeout, connection failure, `5xx`, or malformed response — show a generic message without a backend stack trace;
-* ambiguous `POST /api/orders` — never retry creation and offer an order-status check.
-
-The integration client's explicit error-log context does not include backend response bodies or tokens. It contains only safe operation metadata, status, and exception class.
-
-For order-creation `422`, Telegram checks only an explicitly allowed set of known restaurant-hours messages. A recognized condition is rendered as:
-
-```text
-Сейчас ресторан не принимает заказы. Попробуйте оформить заказ в рабочее время.
+```bash
+docker compose exec telegram-bot php artisan nutgram:list
 ```
 
-Any other backend or Dots message is not displayed directly and receives the generic checkout text. Telegram does not treat every `422` as a closed restaurant.
+## 27. Testing strategy
 
----
+Automated tests should be focused and cheap to maintain:
 
-### Callback and message safety
+- backend client contracts;
+- phone normalization;
+- callback context/security;
+- idempotency key;
+- focused payment/QR behavior;
+- formatters/helpers and small handler contracts.
 
-Every inline callback is acknowledged through `CallbackAcknowledger` exactly once and before session resolution, backend GET, or mutation.
+Obsolete historical tests and expensive pseudo-E2E tests should be deleted rather than migrated. The full Telegram journey is manually verified against actual Telegram/backend services.
 
-Telegram errors indicating a stale callback — `query is too old`, `response timeout expired`, or `query ID is invalid` — are logged safely at debug level. The handler stops immediately, so an old callback cannot mutate the current cart or create an order.
+Useful commands:
 
-Unexpected `TelegramException` instances are not hidden and preserve normal exception/reporting behavior.
+```bash
+php artisan test --compact tests/Feature/TelegramStartTest.php tests/Feature/TelegramContactTest.php tests/Feature/TelegramOnboardingTest.php tests/Feature/TelegramFulfillmentTest.php tests/Feature/TelegramCatalogTest.php tests/Feature/TelegramCartTest.php tests/Feature/TelegramCheckoutTest.php tests/Feature/TelegramCallbackAcknowledgementTest.php tests/Feature/TelegramMessageEditorTest.php tests/Feature/TelegramSessionManagerTest.php tests/Feature/OrderingBackendClientTest.php
 
-Inline messages are edited through `TelegramMessageEditor`. Telegram's `message is not modified` error is a successful no-op: no fallback message is sent and no backend operation is repeated. Other Telegram errors continue to propagate.
-
----
-
-### Security boundaries
-
-The following values are secrets:
-
-* `TELEGRAM_BOT_TOKEN`;
-* `BACKEND_INTERNAL_API_TOKEN`;
-* the backend `X-Session-Token`.
-
-They must not appear in source code, callback data, user-facing messages, or logs.
-
-`OrderingBackendClient` centrally attaches `X-Internal-Api-Token`. `X-Session-Token` is attached only to session-bound requests.
-
-Telegram accepts only limited action identifiers from its callbacks: a backend product ID for adding and a backend cart-item ID for updating or removing. It does not submit client-controlled cart IDs, restaurant IDs, prices, totals, statuses, or external Dots IDs. The Ordering Backend validates ownership and business invariants again.
-
-A contact is accepted only from the same Telegram user who sent the message. Arbitrary backend or Dots error messages are not forwarded to users.
-
----
-
-### Important implementation decisions
-
-* Telegram is a presentation client, not a second backend.
-* All HTTP requests are isolated in `OrderingBackendClient`.
-* Catalog browsing does not depend on a backend session token.
-* Navigation context and the idempotency UUID travel in callback data rather than persistence.
-* Cart and order responses are authoritative; monetary values are not recalculated.
-* Cart-item IDs and product IDs have different roles and are not interchangeable.
-* A fresh cart is read before quantity or remove mutations.
-* DELETE results are confirmed with a subsequent `GET /api/carts/current`.
-* State-changing requests are not automatically retried after session recovery.
-* An ambiguous order POST is not automatically retried.
-* The next cart is ensured only after a confirmed successful order response.
-* Stale callbacks stop before backend work.
-* Editing a Telegram message to identical content is a safe no-op.
-
----
-
-### Testing
-
-Automated feature tests use Laravel HTTP fakes and Nutgram's fake transport, so they make no real requests to the Ordering Backend, Telegram, or Dots.
-
-Coverage includes integration headers and payloads, response normalization, session lifecycle, contact ownership, catalog navigation, cart mutations, checkout, idempotency, next-cart initialization, order refresh, safe backend errors, stale callbacks, Telegram message editing, keyboards, and user-facing formatting.
+cd ../backend
+php artisan test --compact tests/Feature/SessionContactPhoneNormalizationTest.php
+```

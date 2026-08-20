@@ -11,12 +11,13 @@ use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
-class ResolveOrderPaymentHandler
+readonly class ResolveOrderPaymentHandler
 {
     public function __construct(
-        private readonly OrdersApi $ordersApi,
-        private readonly OrderRepository $orders,
-    ) {}
+        private OrdersApi $ordersApi,
+        private OrderRepository $orders,
+    ) {
+    }
 
     /** @return array{status: 'ready'|'pending', checkout_url: string|null, order: Order} */
     public function handle(Order $order, bool $wait = true): array
@@ -59,9 +60,12 @@ class ResolveOrderPaymentHandler
             $order = $confirmedOrder;
         }
 
+        /** @var string $externalOrderId */
+        $externalOrderId = $order->external_order_id;
+
         try {
             $paymentData = $this->ordersApi->getOnlinePaymentData(
-                $order->external_order_id,
+                $externalOrderId,
             );
         } catch (RequestException $exception) {
             if (
@@ -87,7 +91,9 @@ class ResolveOrderPaymentHandler
             return $this->pending($order);
         }
 
-        $checkoutUrl = $paymentData['onlinePayment']['checkoutUrl'] ?? null;
+        /** @var array<string, mixed>|null $onlinePayment */
+        $onlinePayment = $paymentData['onlinePayment'] ?? null;
+        $checkoutUrl = $onlinePayment['checkoutUrl'] ?? null;
 
         if ($checkoutUrl === null || $checkoutUrl === '') {
             Log::info('Dots online payment checkout URL is not ready.', [
@@ -104,6 +110,9 @@ class ResolveOrderPaymentHandler
             ]);
         }
 
+        /** @var string $checkoutUrl */
+        $checkoutUrl = $checkoutUrl;
+
         $snapshot = $this->paymentSnapshot($paymentData);
 
         $order = $this->orders->markPaymentReady(
@@ -117,9 +126,12 @@ class ResolveOrderPaymentHandler
 
     private function confirmCreated(Order $order): ?Order
     {
+        /** @var string $externalOrderId */
+        $externalOrderId = $order->external_order_id;
+
         try {
             $response = $this->ordersApi->get(
-                $order->external_order_id,
+                $externalOrderId,
             );
         } catch (RequestException $exception) {
             if (
@@ -158,9 +170,13 @@ class ResolveOrderPaymentHandler
         return $order;
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * @param  array<string, mixed>  $paymentData
+     * @return array<string, mixed>
+     */
     private function paymentSnapshot(array $paymentData): array
     {
+        /** @var array<string, mixed> $onlinePayment */
         $onlinePayment = $paymentData['onlinePayment'];
 
         return [
@@ -189,9 +205,12 @@ class ResolveOrderPaymentHandler
     /** @return array{status: 'ready', checkout_url: string, order: Order} */
     private function ready(Order $order): array
     {
+        /** @var string $checkoutUrl */
+        $checkoutUrl = $order->payment_checkout_url;
+
         return [
             'status' => 'ready',
-            'checkout_url' => $order->payment_checkout_url,
+            'checkout_url' => $checkoutUrl,
             'order' => $order,
         ];
     }
@@ -208,11 +227,17 @@ class ResolveOrderPaymentHandler
 
     private function waitSeconds(): float
     {
-        return max(0.0, (float) config('services.internal.payment.wait_seconds'));
+        /** @var int|float|string $waitSeconds */
+        $waitSeconds = config('services.internal.payment.wait_seconds');
+
+        return max(0.0, (float) $waitSeconds);
     }
 
     private function pollIntervalMicroseconds(): int
     {
-        return max(1, (int) config('services.internal.payment.poll_interval_ms')) * 1000;
+        /** @var int|string $pollIntervalMilliseconds */
+        $pollIntervalMilliseconds = config('services.internal.payment.poll_interval_ms');
+
+        return max(1, (int) $pollIntervalMilliseconds) * 1000;
     }
 }

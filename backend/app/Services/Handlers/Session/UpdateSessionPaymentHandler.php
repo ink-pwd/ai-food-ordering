@@ -2,6 +2,7 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\SessionData;
 use App\Enums\PaymentType;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\RestaurantRepository;
@@ -17,13 +18,14 @@ final class UpdateSessionPaymentHandler
         private readonly SessionRepository $sessions,
         private readonly RestaurantRepository $restaurants,
         private readonly CartRepository $carts,
-    ) {}
+    ) {
+    }
 
     public function handle(
-        array $session,
+        SessionData $session,
         string $plainToken,
         PaymentType $paymentType,
-    ): array {
+    ): SessionData {
         $restaurant = $this->restaurants->findActiveById(
             SessionSelection::restaurantId($session),
         );
@@ -36,7 +38,7 @@ final class UpdateSessionPaymentHandler
 
         if ($this->carts->hasNonActiveCartForSession(
             $restaurant,
-            $session['id'],
+            $session->id,
         )) {
             throw new ConflictHttpException(
                 'Payment method cannot be changed after checkout.'
@@ -54,6 +56,6 @@ final class UpdateSessionPaymentHandler
             throw new NotFoundHttpException('Session not found.');
         }
 
-        return $updatedSession;
+        return SessionData::fromArray($updatedSession);
     }
 }

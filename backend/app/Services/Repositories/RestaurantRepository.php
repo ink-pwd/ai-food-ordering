@@ -8,13 +8,12 @@ use Illuminate\Database\Eloquent\Collection;
 
 class RestaurantRepository
 {
-    public function findActiveBySlug(string $slug): ?Restaurant
+    public function findActiveBySlugOrFail(string $slug): Restaurant
     {
         return Restaurant::query()
-            ->select(['id', 'name', 'slug', 'currency', 'locale', 'timezone'])
             ->where('slug', $slug)
             ->where('is_active', true)
-            ->first();
+            ->firstOrFail();
     }
 
     public function findActiveById(int $id): ?Restaurant

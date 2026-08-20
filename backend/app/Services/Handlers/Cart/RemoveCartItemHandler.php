@@ -2,27 +2,31 @@
 
 namespace App\Services\Handlers\Cart;
 
-use App\Enums\CartStatus;
+use App\DTO\SessionData;
 use App\Models\Cart;
+use App\Models\Restaurant;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Resolvers\Cart\ActiveCartForUpdateResolver;
+use App\Services\Resolvers\Cart\CartItemForUpdateResolver;
 use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class RemoveCartItemHandler
+readonly class RemoveCartItemHandler
 {
     public function __construct(
         private readonly RestaurantRepository $restaurants,
         private readonly CartRepository $carts,
-    ) {}
+        private readonly ActiveCartForUpdateResolver $activeCartForUpdateResolver,
+        private readonly CartItemForUpdateResolver $cartItemForUpdateResolver,
+    ) {
+    }
 
-    /**
-     * @param  array<string, mixed>  $session
-     */
-    public function handle(array $session, int $itemId): Cart
-    {
+    public function handle(
+        SessionData $session,
+        int $itemId,
+    ): Cart {
         $restaurant = $this->restaurants->findActiveById(
             SessionSelection::restaurantId($session),
         );
@@ -31,50 +35,44 @@ class RemoveCartItemHandler
             throw new NotFoundHttpException;
         }
 
-        return DB::transaction(function () use (
-            $restaurant,
-            $session,
-            $itemId,
-        ): Cart {
-            $cart = $this->carts->findForSessionForUpdate(
+        // The cart/item rows are locked below; item deletion and total recalculation must commit atomically.
+        return DB::transaction(
+            fn (): Cart => $this->removeItemAndRecalculateTotals(
                 $restaurant,
-                $session['id'],
-            );
-
-            if ($cart === null) {
-                throw new NotFoundHttpException('Cart not found.');
-            }
-
-            if (
-                $cart->status !== CartStatus::Active
-                || $cart->expires_at->lessThanOrEqualTo(now())
-            ) {
-                throw new ConflictHttpException('Cart is not active.');
-            }
-
-            $item = $this->carts->findItemForCartForUpdate(
-                $cart,
+                $session,
                 $itemId,
-            );
+            ),
+        );
+    }
 
-            if ($item === null) {
-                throw new NotFoundHttpException('Cart item not found.');
-            }
+    private function removeItemAndRecalculateTotals(
+        Restaurant $restaurant,
+        SessionData $session,
+        int $itemId,
+    ): Cart {
+        $cart = $this->activeCartForUpdateResolver->resolve(
+            $restaurant,
+            $session->id,
+        );
 
-            $this->carts->deleteItem($item);
+        $item = $this->cartItemForUpdateResolver->resolve(
+            $cart,
+            $itemId,
+        );
 
-            $subtotal = $this->sumMoney(
-                $this->carts->itemTotals($cart),
-            );
+        $this->carts->deleteItem($item);
 
-            $this->carts->updateTotals(
-                $cart,
-                $subtotal,
-                $subtotal,
-            );
+        $subtotal = $this->sumMoney(
+            $this->carts->itemTotals($cart),
+        );
 
-            return $this->carts->refreshWithItems($cart);
-        });
+        $this->carts->updateTotals(
+            $cart,
+            $subtotal,
+            $subtotal,
+        );
+
+        return $this->carts->refreshWithItems($cart);
     }
 
     /**
@@ -97,7 +95,8 @@ class RemoveCartItemHandler
                 '0',
             );
 
-            $cents += ((int) $whole * 100) + (int) $fraction;
+            $cents += ((int) $whole * 100)
+                + (int) $fraction;
         }
 
         return sprintf(

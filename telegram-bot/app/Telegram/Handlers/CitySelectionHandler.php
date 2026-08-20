@@ -10,16 +10,17 @@ use App\Telegram\Session\TelegramSessionRecovery;
 use App\Telegram\TelegramMessageEditor;
 use SergiX44\Nutgram\Nutgram;
 
-final class CitySelectionHandler
+final readonly class CitySelectionHandler
 {
     public function __construct(
-        private readonly CallbackAcknowledger $callbackAcknowledger,
-        private readonly TelegramSessionRecovery $sessionRecovery,
-        private readonly OrderingBackendClient $backend,
-        private readonly OnboardingFlow $onboarding,
-        private readonly CityKeyboard $cityKeyboard,
-        private readonly TelegramMessageEditor $messageEditor,
-    ) {}
+        private CallbackAcknowledger $callbackAcknowledger,
+        private TelegramSessionRecovery $sessionRecovery,
+        private OrderingBackendClient $backend,
+        private OnboardingFlow $onboarding,
+        private CityKeyboard $cityKeyboard,
+        private TelegramMessageEditor $messageEditor,
+    ) {
+    }
 
     public function select(Nutgram $bot, int $cityId): void
     {

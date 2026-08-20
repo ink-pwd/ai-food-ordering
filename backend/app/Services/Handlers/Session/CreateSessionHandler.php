@@ -2,23 +2,29 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\SessionData;
 use App\Enums\SessionChannel;
 use App\Enums\SessionStatus;
 use App\Services\Repositories\SessionRepository;
 use Illuminate\Support\Str;
 
-class CreateSessionHandler
+readonly class CreateSessionHandler
 {
     public function __construct(
-        private readonly SessionRepository $sessions,
-    ) {}
+        private SessionRepository $sessions,
+    ) {
+    }
 
     /**
-     * @return array{token: string, session: array{id: string, city_id: int|null, restaurant_id: int|null, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}}|null
+     * @return array{token: string, session: SessionData}|null
      */
-    public function handle(SessionChannel $channel, string $externalSessionId): ?array
-    {
-        $ttlSeconds = (int) config('services.internal.session_ttl_seconds');
+    public function handle(
+        SessionChannel $channel,
+        string $externalSessionId,
+    ): ?array {
+        /** @var int|string $ttlSecondsValue */
+        $ttlSecondsValue = config('services.internal.session_ttl_seconds');
+        $ttlSeconds = (int) $ttlSecondsValue;
 
         if ($ttlSeconds <= 0) {
             return null;
@@ -44,7 +50,7 @@ class CreateSessionHandler
 
         return [
             'token' => $plainToken,
-            'session' => $session,
+            'session' => SessionData::fromArray($session),
         ];
     }
 }

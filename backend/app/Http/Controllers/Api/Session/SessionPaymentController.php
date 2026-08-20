@@ -11,13 +11,10 @@ final class SessionPaymentController extends Controller
 {
     public function __invoke(
         UpdateSessionPaymentRequest $request,
-        UpdateSessionPaymentHandler $handler,
+        UpdateSessionPaymentHandler $updateSessionPaymentHandler,
     ): SessionPaymentResponse {
-        /** @var array<string, mixed> $session */
-        $session = $request->attributes->get('internal_session');
-
-        $updatedSession = $handler->handle(
-            session: $session,
+        $updatedSession = $updateSessionPaymentHandler->handle(
+            session: $request->internalSession(),
             plainToken: (string) $request->header('X-Session-Token'),
             paymentType: $request->paymentType(),
         );

@@ -2,26 +2,29 @@
 
 namespace App\Services\Handlers\Cart;
 
-use App\Enums\CartStatus;
+use App\DTO\SessionData;
 use App\Models\Cart;
+use App\Models\Restaurant;
 use App\Services\Repositories\CartRepository;
 use App\Services\Repositories\RestaurantRepository;
+use App\Services\Resolvers\Cart\ActiveCartForUpdateResolver;
 use App\Services\Support\SessionSelection;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class ClearCartHandler
+readonly class ClearCartHandler
 {
     public function __construct(
         private readonly RestaurantRepository $restaurants,
         private readonly CartRepository $carts,
-    ) {}
+        private readonly ActiveCartForUpdateResolver $activeCartForUpdateResolver,
+    ) {
+    }
 
     /**
-     * @param  array<string, mixed>  $session
+     * @throws \Throwable
      */
-    public function handle(array $session): Cart
+    public function handle(SessionData $session): Cart
     {
         $restaurant = $this->restaurants->findActiveById(
             SessionSelection::restaurantId($session),
@@ -31,35 +34,32 @@ class ClearCartHandler
             throw new NotFoundHttpException;
         }
 
-        return DB::transaction(function () use (
-            $restaurant,
-            $session,
-        ): Cart {
-            $cart = $this->carts->findForSessionForUpdate(
+        // The cart row is locked below; item deletion and total reset must commit atomically.
+        return DB::transaction(
+            fn (): Cart => $this->clearItemsAndResetTotals(
                 $restaurant,
-                $session['id'],
-            );
+                $session,
+            ),
+        );
+    }
 
-            if ($cart === null) {
-                throw new NotFoundHttpException('Cart not found.');
-            }
+    private function clearItemsAndResetTotals(
+        Restaurant $restaurant,
+        SessionData $session,
+    ): Cart {
+        $cart = $this->activeCartForUpdateResolver->resolve(
+            $restaurant,
+            $session->id,
+        );
 
-            if (
-                $cart->status !== CartStatus::Active
-                || $cart->expires_at->lessThanOrEqualTo(now())
-            ) {
-                throw new ConflictHttpException('Cart is not active.');
-            }
+        $this->carts->deleteItems($cart);
 
-            $this->carts->deleteItems($cart);
+        $this->carts->updateTotals(
+            $cart,
+            '0.00',
+            '0.00',
+        );
 
-            $this->carts->updateTotals(
-                $cart,
-                '0.00',
-                '0.00',
-            );
-
-            return $this->carts->refreshWithItems($cart);
-        });
+        return $this->carts->refreshWithItems($cart);
     }
 }

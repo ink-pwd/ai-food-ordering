@@ -2,32 +2,28 @@
 
 namespace App\Services\Repositories;
 
+use App\DTO\OtpChallengeData;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
 
-class OtpChallengeRepository
+readonly class OtpChallengeRepository
 {
     public function __construct(
-        private readonly CacheFactory $cache,
-    ) {}
+        private CacheFactory $cache,
+    ) {
+    }
 
-    /**
-     * @param  array{session_id: string, phone: string, code_hash: string, attempts_remaining: int, expires_at: string, resend_available_at: string}  $challenge
-     */
-    public function put(string $sessionId, array $challenge): void
+    public function put(string $sessionId, OtpChallengeData $challenge): void
     {
         $this->store()->put(
             $this->cacheKey($sessionId),
-            json_encode($challenge, JSON_THROW_ON_ERROR),
+            json_encode($challenge->toArray(), JSON_THROW_ON_ERROR),
             $this->ttlSeconds(),
         );
     }
 
-    /**
-     * @return array{session_id: string, phone: string, code_hash: string, attempts_remaining: int, expires_at: string, resend_available_at: string}|null
-     */
-    public function find(string $sessionId): ?array
+    public function find(string $sessionId): ?OtpChallengeData
     {
         $challenge = $this->store()->get($this->cacheKey($sessionId));
 
@@ -35,7 +31,12 @@ class OtpChallengeRepository
             return null;
         }
 
-        return json_decode($challenge, true, flags: JSON_THROW_ON_ERROR);
+        /** @var string $challenge */
+        $challenge = $challenge;
+        /** @var array{session_id: string, phone: string, code_hash: string, attempts_remaining: int, expires_at: string, resend_available_at: string} $decoded */
+        $decoded = json_decode($challenge, true, flags: JSON_THROW_ON_ERROR);
+
+        return OtpChallengeData::fromArray($decoded);
     }
 
     public function forget(string $sessionId): bool
@@ -43,15 +44,12 @@ class OtpChallengeRepository
         return $this->store()->forget($this->cacheKey($sessionId));
     }
 
-    /**
-     * @param  array{session_id: string, phone: string, code_hash: string, attempts_remaining: int, expires_at: string, resend_available_at: string}  $challenge
-     */
-    public function update(string $sessionId, array $challenge): void
+    public function update(string $sessionId, OtpChallengeData $challenge): void
     {
         $this->store()->put(
             $this->cacheKey($sessionId),
-            json_encode($challenge, JSON_THROW_ON_ERROR),
-            max(1, now()->diffInSeconds($this->expiresAt($challenge['expires_at']), false)),
+            json_encode($challenge->toArray(), JSON_THROW_ON_ERROR),
+            (int) max(1, now()->diffInSeconds($this->expiresAt($challenge->expiresAt), false)),
         );
     }
 
@@ -62,17 +60,26 @@ class OtpChallengeRepository
 
     private function store(): CacheRepository
     {
-        return $this->cache->store((string) config('services.internal.otp.store'));
+        /** @var string $store */
+        $store = config('services.internal.otp.store');
+
+        return $this->cache->store((string) $store);
     }
 
     private function ttlSeconds(): int
     {
-        return max(1, (int) config('services.internal.otp.ttl_seconds'));
+        /** @var int|string $ttlSeconds */
+        $ttlSeconds = config('services.internal.otp.ttl_seconds');
+
+        return max(1, (int) $ttlSeconds);
     }
 
     private function keyPrefix(): string
     {
-        return (string) config('services.internal.otp.key_prefix');
+        /** @var string $keyPrefix */
+        $keyPrefix = config('services.internal.otp.key_prefix');
+
+        return (string) $keyPrefix;
     }
 
     private function expiresAt(string $expiresAt): Carbon

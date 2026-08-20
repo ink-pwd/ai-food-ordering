@@ -10,6 +10,10 @@ use App\Models\OrderItem;
 
 class OrderRepository
 {
+    /**
+     * @param  array<string, mixed>|null  $fulfillmentSnapshot
+     * @param  array<string, mixed>|null  $requestPayload
+     */
     public function create(
         int $restaurantId,
         int $cartId,
@@ -174,6 +178,7 @@ class OrderRepository
         return $order;
     }
 
+    /** @param array<string, mixed> $paymentSnapshot */
     public function markPaymentReady(
         Order $order,
         string $checkoutUrl,

@@ -6,19 +6,29 @@ function normalizeBackendPhoneForTest(string $phone): string
 {
     $request = new UpdateSessionContactRequest;
     $method = new ReflectionMethod($request, 'normalizePhone');
+    $result = $method->invoke($request, $phone);
 
-    return $method->invoke($request, $phone);
+    if (! is_string($result)) {
+        throw new RuntimeException('normalizePhone must return a string.');
+    }
+
+    return $result;
 }
 
 function isValidBackendPhoneForTest(string $phone): bool
 {
     $request = new UpdateSessionContactRequest;
     $method = new ReflectionMethod($request, 'isValidNormalizedPhone');
+    $result = $method->invoke($request, $phone);
 
-    return $method->invoke($request, $phone);
+    if (! is_bool($result)) {
+        throw new RuntimeException('isValidNormalizedPhone must return a bool.');
+    }
+
+    return $result;
 }
 
-test('contact phone normalization accepts required international formats', function (string $phone, string $expected) {
+test('contact phone normalization accepts required international formats', function (string $phone, string $expected): void {
     $normalized = normalizeBackendPhoneForTest($phone);
 
     expect($normalized)->toBe($expected)
@@ -39,7 +49,7 @@ test('contact phone normalization accepts required international formats', funct
     'usa formatted' => ['+1 (415) 555-2671', '+14155552671'],
 ]);
 
-test('contact phone validation rejects malformed normalized numbers', function (string $phone) {
+test('contact phone validation rejects malformed normalized numbers', function (string $phone): void {
     $normalized = normalizeBackendPhoneForTest($phone);
 
     expect(isValidBackendPhoneForTest($normalized))->toBeFalse();

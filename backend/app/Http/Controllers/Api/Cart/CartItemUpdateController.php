@@ -11,12 +11,12 @@ class CartItemUpdateController extends Controller
 {
     public function __invoke(
         UpdateCartItemRequest $request,
-        UpdateCartItemHandler $handler,
-        int $item,
+        UpdateCartItemHandler $updateCartItemHandler,
+        int $itemId,
     ): CartResponse {
-        $cart = $handler->handle(
+        $cart = $updateCartItemHandler->handle(
             $request->internalSession(),
-            $item,
+            $itemId,
             $request->quantity(),
         );
 

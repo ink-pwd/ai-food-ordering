@@ -2,6 +2,8 @@
 
 namespace App\Services\Handlers\Session;
 
+use App\DTO\OtpChallengeData;
+use App\DTO\SessionData;
 use App\Services\Repositories\OtpChallengeRepository;
 use App\Services\Repositories\SessionRepository;
 use App\Services\Support\SessionSelection;
@@ -10,19 +12,19 @@ use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class VerifySessionOtpHandler
+readonly class VerifySessionOtpHandler
 {
     public function __construct(
-        private readonly OtpChallengeRepository $otps,
-        private readonly SessionRepository $sessions,
-    ) {}
+        private OtpChallengeRepository $otps,
+        private SessionRepository $sessions,
+    ) {
+    }
 
-    /**
-     * @param  array<string, mixed>  $session
-     * @return array<string, mixed>
-     */
-    public function handle(string $plainToken, array $session, string $code): array
-    {
+    public function handle(
+        string $plainToken,
+        SessionData $session,
+        string $code,
+    ): SessionData {
         $contact = SessionSelection::contact($session);
 
         if ($contact === null) {
@@ -33,28 +35,32 @@ class VerifySessionOtpHandler
             throw new ConflictHttpException('Phone is already verified.');
         }
 
-        $challenge = $this->otps->find($session['id']);
+        $challenge = $this->otps->find($session->id);
 
-        if ($challenge === null
-            || $challenge['session_id'] !== $session['id']
-            || $challenge['phone'] !== $contact['phone']
-            || now()->parse($challenge['expires_at'])->isPast()
-            || $challenge['attempts_remaining'] < 1
+        if (
+            $this->isInvalidChallenge(
+                $challenge,
+                $session->id,
+                $contact['phone'],
+            )
         ) {
-            $this->otps->forget($session['id']);
+            $this->otps->forget($session->id);
 
             throw ValidationException::withMessages([
                 'code' => ['The OTP code is invalid or expired.'],
             ]);
         }
 
-        if (! Hash::check($code, $challenge['code_hash'])) {
-            $challenge['attempts_remaining']--;
+        /** @var OtpChallengeData $challenge */
+        if (! Hash::check($code, $challenge->codeHash)) {
+            $challenge = $challenge->withAttemptsRemaining(
+                $challenge->attemptsRemaining - 1,
+            );
 
-            if ($challenge['attempts_remaining'] < 1) {
-                $this->otps->forget($session['id']);
+            if ($challenge->attemptsRemaining < 1) {
+                $this->otps->forget($session->id);
             } else {
-                $this->otps->update($session['id'], $challenge);
+                $this->otps->update($session->id, $challenge);
             }
 
             throw ValidationException::withMessages([
@@ -62,7 +68,7 @@ class VerifySessionOtpHandler
             ]);
         }
 
-        $this->otps->forget($session['id']);
+        $this->otps->forget($session->id);
 
         $updatedSession = $this->sessions->updateMetadata($plainToken, [
             'contact' => array_merge($contact, ['phone_verified' => true]),
@@ -72,6 +78,20 @@ class VerifySessionOtpHandler
             throw new NotFoundHttpException;
         }
 
-        return $updatedSession;
+        return SessionData::fromArray($updatedSession);
+    }
+
+    private function isInvalidChallenge(
+        ?OtpChallengeData $challenge,
+        string $sessionId,
+        string $phone,
+    ): bool {
+        return $challenge === null
+            || $challenge->sessionId !== $sessionId
+            || $challenge->phone !== $phone
+            || now()->parse(
+                $challenge->expiresAt,
+            )->isPast()
+            || $challenge->attemptsRemaining < 1;
     }
 }

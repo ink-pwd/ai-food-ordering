@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\DTO\SessionData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class CreateOrderRequest extends FormRequest
@@ -47,12 +48,18 @@ class CreateOrderRequest extends FormRequest
 
     public function idempotencyKey(): string
     {
-        return (string) $this->validated('_idempotency_key');
+        /** @var string $idempotencyKey */
+        $idempotencyKey = $this->validated('_idempotency_key');
+
+        return (string) $idempotencyKey;
     }
 
     public function deliveryTime(): int
     {
-        return (int) ($this->validated('delivery_time') ?? 0);
+        /** @var int|string|null $deliveryTime */
+        $deliveryTime = $this->validated('delivery_time');
+
+        return (int) ($deliveryTime ?? 0);
     }
 
     public function sessionToken(): string
@@ -60,11 +67,11 @@ class CreateOrderRequest extends FormRequest
         return (string) $this->headers->get('X-Session-Token');
     }
 
-    /**
-     * @return array{id: string, restaurant_id: int, channel: string, external_session_id: string, status: string, metadata: array<string, mixed>, created_at: string, expires_at: string}
-     */
-    public function internalSession(): array
+    public function internalSession(): SessionData
     {
-        return $this->attributes->get('internal_session');
+        /** @var SessionData $session */
+        $session = $this->attributes->get('internal_session');
+
+        return $session;
     }
 }

@@ -11,7 +11,8 @@ final class TelegramSessionManager
     public function __construct(
         private readonly TelegramSessionStore $sessions,
         private readonly OrderingBackendClient $backend,
-    ) {}
+    ) {
+    }
 
     public function resolve(Nutgram $bot): string
     {

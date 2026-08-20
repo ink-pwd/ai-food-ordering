@@ -29,12 +29,18 @@ class RestaurantProductSearchRequest extends FormRequest
 
     public function searchQuery(): string
     {
-        return (string) $this->validated('q');
+        /** @var string $query */
+        $query = $this->validated('q');
+
+        return (string) $query;
     }
 
     public function resultLimit(): int
     {
-        return (int) ($this->validated('limit') ?? 10);
+        /** @var int|string|null $limit */
+        $limit = $this->validated('limit');
+
+        return (int) ($limit ?? 10);
     }
 
     protected function prepareForValidation(): void

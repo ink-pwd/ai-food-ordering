@@ -4,12 +4,13 @@ namespace App\Integrations\Dots;
 
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 
-class CatalogApi
+readonly class CatalogApi
 {
     public function __construct(
-        private readonly DotsClient $dotsClient,
-        private readonly CacheFactory $cache,
-    ) {}
+        private DotsClient $dotsClient,
+        private CacheFactory $cache,
+    ) {
+    }
 
     /**
      * @return array<string, mixed>
@@ -20,7 +21,10 @@ class CatalogApi
         $cacheKey = $this->cacheKey($companyId);
 
         if ($cache->has($cacheKey)) {
-            return $cache->get($cacheKey);
+            /** @var array<string, mixed> $catalog */
+            $catalog = $cache->get($cacheKey);
+
+            return $catalog;
         }
 
         $catalog = $this->fetchCompanyCatalog($companyId);
@@ -46,6 +50,7 @@ class CatalogApi
         return $catalog;
     }
 
+    /** @return array<string, mixed> */
     private function fetchCompanyCatalog(string $companyId): array
     {
         return $this->dotsClient->get("/api/v2/companies/{$companyId}/items-by-categories");
@@ -53,15 +58,21 @@ class CatalogApi
 
     private function cacheKey(string $companyId): string
     {
+        /** @var string $apiVersion */
+        $apiVersion = config('services.dots.api_version');
+
         return sprintf(
             'dots:catalog:v:%s:company:%s:items-by-categories',
-            config('services.dots.api_version'),
+            $apiVersion,
             $companyId,
         );
     }
 
     private function cacheTtlSeconds(): int
     {
-        return (int) config('services.dots.catalog_cache_ttl_seconds');
+        /** @var int|string $ttlSeconds */
+        $ttlSeconds = config('services.dots.catalog_cache_ttl_seconds');
+
+        return (int) $ttlSeconds;
     }
 }

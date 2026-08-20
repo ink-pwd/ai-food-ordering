@@ -2,15 +2,16 @@
 
 namespace App\Services\Support;
 
+use App\DTO\SessionData;
 use App\Enums\PaymentType;
 use App\Models\Restaurant;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 final class PaymentSelection
 {
-    public static function type(array $session): PaymentType
+    public static function type(SessionData $session): PaymentType
     {
-        $value = $session['metadata']['payment_type'] ?? null;
+        $value = $session->metadata['payment_type'] ?? null;
 
         $type = is_numeric($value)
             ? PaymentType::tryFrom((int) $value)
@@ -28,7 +29,10 @@ final class PaymentSelection
         PaymentType $paymentType,
     ): void {
         $availableTypes = array_map(
-            'intval',
+            static function (mixed $type): int {
+                /** @var int|string $type */
+                return (int) $type;
+            },
             $restaurant->available_payment_types ?? [],
         );
 

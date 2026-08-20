@@ -2,13 +2,14 @@
 
 namespace App\Telegram\Keyboards;
 
+use App\DTO\OrderingBackend\CartItemData;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 final class CartKeyboard
 {
     /**
-     * @param  list<array{id: int, product_id: int, external_product_id: string, name: string, quantity: int, unit_price: string, total: string}>  $items
+     * @param  list<CartItemData>  $items
      */
     public function make(array $items = [], string $status = 'active', string $context = ''): InlineKeyboardMarkup
     {
@@ -16,25 +17,25 @@ final class CartKeyboard
 
         foreach ($items as $cartItem) {
             $keyboard->addRow(InlineKeyboardButton::make(
-                text: "🍽 {$cartItem['name']}",
-                callback_data: "cart:noop:{$cartItem['id']}:{$context}",
+                text: "🍽 {$cartItem->name}",
+                callback_data: "cart:noop:{$cartItem->id}:{$context}",
             ))->addRow(
                 InlineKeyboardButton::make(
                     text: '➖',
-                    callback_data: "cart:dec:{$cartItem['id']}:{$context}",
+                    callback_data: "cart:dec:{$cartItem->id}:{$context}",
                 ),
                 InlineKeyboardButton::make(
-                    text: "🔢 {$cartItem['quantity']}",
-                    callback_data: "cart:noop:{$cartItem['id']}:{$context}",
+                    text: "🔢 {$cartItem->quantity}",
+                    callback_data: "cart:noop:{$cartItem->id}:{$context}",
                 ),
                 InlineKeyboardButton::make(
                     text: '➕',
-                    callback_data: "cart:inc:{$cartItem['id']}:{$context}",
+                    callback_data: "cart:inc:{$cartItem->id}:{$context}",
                 ),
             )->addRow(
                 InlineKeyboardButton::make(
                     text: '🗑 Видалити',
-                    callback_data: "cart:remove:{$cartItem['id']}:{$context}",
+                    callback_data: "cart:remove:{$cartItem->id}:{$context}",
                 ),
             );
         }
