@@ -1,6 +1,6 @@
 # AI Food Ordering Backend
 
-Laravel backend service for the AI Food Ordering project. It owns the business state for sessions, city/restaurant selection, fulfillment, catalog data, carts, Dots order creation, online payment links, and backend-generated payment QR codes.
+Laravel backend service for the AI Food Ordering project. It owns the business state for sessions, city/restaurant selection, fulfillment, catalog data, carts, Dots order creation and tracking, online payment links, and backend-generated payment QR codes.
 
 Telegram and MCP clients are thin clients. They call this internal REST API; they do not talk to Dots directly and they do not provide trusted Dots identifiers, prices, payment URLs, or QR paths.
 
@@ -40,6 +40,7 @@ The backend persists synchronized Dots topology/catalog data, stores Redis-backe
 11. Create local and Dots order.
 12. Resolve online payment checkout URL.
 13. Retrieve backend-generated payment QR PNG.
+14. Track an existing order by its local order number and read Dots order/courier data when available.
 
 ## Main domain entities
 
@@ -51,7 +52,7 @@ The backend persists synchronized Dots topology/catalog data, stores Redis-backe
 - `Session` — Redis state for the current internal client journey.
 - `Cart` — PostgreSQL cart bound to the selected restaurant/session.
 - `CartItem` — product and quantity inside a cart.
-- `Order` — historical checkout record with fulfillment snapshot, Dots order id, payment URL, and QR metadata.
+- `Order` — historical checkout record with fulfillment snapshot, Dots order id, payment URL, QR metadata, and safe ownership-scoped tracking lookup.
 
 ## Synchronization
 
@@ -91,6 +92,8 @@ Pickup and delivery are selected after city and restaurant selection. Pickup req
 
 Checkout uses the selected city/restaurant/fulfillment and current cart. Dots is authoritative for price validation. Order creation is idempotent through the `Idempotency-Key` header. The backend never accepts client-provided Dots IDs, prices, payment type, fulfillment snapshots, or order item totals.
 
+Existing orders can be retrieved through the internal `GET /api/orders/{order}/tracking` endpoint using the local order number shown to the user. The backend verifies the current session's confirmed customer phone before resolving the local order to its Dots order id, then reads Dots order information and courier data when available. If external tracking data is temporarily unavailable, the local order state remains available without exposing another customer's order.
+
 ## Payments
 
 Orders use Dots online payment (`paymentType = 2`). Dots creates the payment as part of order creation. The backend polls/retries online-payment-data retrieval with bounded waiting, represents payment as `pending` or `ready`, and persists the trusted `checkoutUrl` when ready. Idempotent order replay does not create another Dots order and may resolve missing payment data.
@@ -125,7 +128,7 @@ Order creation also requires:
 Idempotency-Key
 ```
 
-The backend derives trusted Dots city, restaurant, address, price, payment, and QR data from persisted state. It rejects arbitrary checkout URLs, QR paths, Dots IDs, session IDs, and totals from clients.
+The backend derives trusted Dots city, restaurant, address, price, payment, and QR data from persisted state. It rejects arbitrary checkout URLs, QR paths, Dots IDs, session IDs, and totals from clients. Tracking by local order number is additionally scoped to the verified customer phone from the current session, preventing order-number enumeration from exposing another customer's order.
 
 ## Installation
 
@@ -154,10 +157,16 @@ docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app php 
 
 ## Testing
 
-Run formatting:
+Run the backend code-style check:
 
 ```bash
-docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app vendor/bin/pint --dirty --format agent
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app ./vendor/bin/php-cs-fixer fix --dry-run --diff
+```
+
+Run PHPStan:
+
+```bash
+docker compose -f ../docker-compose.yml exec --user "$(id -u):$(id -g)" app ./vendor/bin/phpstan analyse --memory-limit=1G
 ```
 
 Run backend tests:

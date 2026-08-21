@@ -14,6 +14,7 @@ final class MainMenuKeyboard
             ->addRow(InlineKeyboardButton::make('🛒 Кошик', callback_data: "menu:cart:{$context}"))
             ->addRow(InlineKeyboardButton::make('🚚 Спосіб отримання', callback_data: "fulfillment:menu:{$context}"))
             ->addRow(InlineKeyboardButton::make('📍 Де замовлення?', callback_data: "menu:tracking:{$context}"))
+            ->addRow(InlineKeyboardButton::make('🤖 AI-помічник', callback_data: "menu:ai:{$context}"))
             ->addRow(InlineKeyboardButton::make('🚪 Вийти', callback_data: 'exit'));
     }
 }

@@ -18,7 +18,7 @@ function inlineButtonsForTrackingTest(object $keyboard): array
     );
 }
 
-test('main menu places order tracking immediately before exit', function (): void {
+test('main menu keeps tracking and ai assistant before exit', function (): void {
     $buttons = inlineButtonsForTrackingTest(
         (new MainMenuKeyboard)->make('7:fingerprint'),
     );
@@ -28,9 +28,12 @@ test('main menu places order tracking immediately before exit', function (): voi
         '🛒 Кошик',
         '🚚 Спосіб отримання',
         '📍 Де замовлення?',
+        '🤖 AI-помічник',
         '🚪 Вийти',
     ])->and($buttons[3]['callback_data'])
-        ->toBe('menu:tracking:7:fingerprint');
+        ->toBe('menu:tracking:7:fingerprint')
+        ->and($buttons[4]['callback_data'])
+        ->toBe('menu:ai:7:fingerprint');
 });
 
 test('post order keyboards return to main menu instead of exiting', function (): void {

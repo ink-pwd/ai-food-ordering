@@ -15,6 +15,7 @@ final readonly class FulfillmentHandler
         private FulfillmentContextResolver $contextResolver,
         private FulfillmentPresenter $presenter,
         private DeliveryAddressFlow $deliveryAddressFlow,
+        private AiAssistantHandler $aiAssistant,
     ) {
     }
 
@@ -151,6 +152,10 @@ final readonly class FulfillmentHandler
         Nutgram $bot,
         string $address,
     ): void {
+        if ($this->aiAssistant->handleInputIfExpected($bot, $address)) {
+            return;
+        }
+
         $this->deliveryAddressFlow->handleAddress(
             $bot,
             $address,

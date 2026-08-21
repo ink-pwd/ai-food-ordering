@@ -1,5 +1,6 @@
 <?php
 
+use App\Telegram\Handlers\AiAssistantHandler;
 use App\Telegram\Handlers\CartHandler;
 use App\Telegram\Handlers\CatalogHandler;
 use App\Telegram\Handlers\CheckoutHandler;
@@ -57,6 +58,10 @@ $bot->onCallbackQueryData('post_order:main_menu:{restaurantId}:{fingerprint}', [
 $bot->onCallbackQueryData('menu:cart:{restaurantId}:{fingerprint}', [CartHandler::class, 'show'])
     ->whereNumber('restaurantId');
 $bot->onCallbackQueryData('menu:tracking:{restaurantId}:{fingerprint}', [OrderTrackingHandler::class, 'prompt'])
+    ->whereNumber('restaurantId');
+$bot->onCallbackQueryData('menu:ai:{restaurantId}:{fingerprint}', [AiAssistantHandler::class, 'open'])
+    ->whereNumber('restaurantId');
+$bot->onCallbackQueryData('ai:back:{restaurantId}:{fingerprint}', [AiAssistantHandler::class, 'back'])
     ->whereNumber('restaurantId');
 $bot->onCallbackQueryData('tracking:back:{restaurantId}:{fingerprint}', [OrderTrackingHandler::class, 'back'])
     ->whereNumber('restaurantId');
