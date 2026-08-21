@@ -166,12 +166,13 @@ class CartRepository
             ]);
     }
 
-    public function hasNonActiveCartForSession(Restaurant $restaurant, string $sessionId): bool
+    public function hasOrderForActiveCartForSession(Restaurant $restaurant, string $sessionId): bool
     {
         return Cart::query()
             ->where('restaurant_id', $restaurant->id)
             ->where('session_id', $sessionId)
-            ->where('status', '!=', CartStatus::Active)
+            ->where('status', CartStatus::Active)
+            ->whereHas('order')
             ->exists();
     }
 

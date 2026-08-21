@@ -2,6 +2,7 @@
 
 use App\DTO\SessionData;
 use App\Models\Restaurant;
+use App\Services\Repositories\CartRepository;
 use App\Services\Support\FulfillmentSelection;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
@@ -19,6 +20,23 @@ function fulfillmentSelectionSession(?array $fulfillment): SessionData
         expiresAt: '2099-01-01T00:00:00+00:00',
         fulfillment: $fulfillment,
     );
+}
+
+function fulfillmentSelectionCartRepository(bool $checkoutInProgress): CartRepository
+{
+    return new class($checkoutInProgress) extends CartRepository {
+        public function __construct(
+            private readonly bool $checkoutInProgress,
+        ) {
+        }
+
+        public function hasOrderForActiveCartForSession(
+            Restaurant $restaurant,
+            string $sessionId,
+        ): bool {
+            return $this->checkoutInProgress;
+        }
+    };
 }
 
 test('pickup support follows Dots delivery type two', function (array $types, bool $expected): void {
@@ -94,3 +112,28 @@ test('acceptable delivery type accepts numeric string values and preserves the s
     'numeric string one' => [[['type' => '2'], ['type' => '1', 'price' => '20.00']], ['type' => '1', 'price' => '20.00']],
     'no recognized delivery type' => [[['type' => 2], ['type' => 3]], null],
 ]);
+
+test('fulfillment remains mutable after a previous cart has completed checkout', function (): void {
+    $restaurant = new Restaurant;
+
+    FulfillmentSelection::assertMutable(
+        fulfillmentSelectionCartRepository(false),
+        $restaurant,
+        'session-1',
+    );
+
+    expect(true)->toBeTrue();
+});
+
+test('fulfillment is locked while the active cart already has an order', function (): void {
+    $restaurant = new Restaurant;
+
+    expect(fn () => FulfillmentSelection::assertMutable(
+        fulfillmentSelectionCartRepository(true),
+        $restaurant,
+        'session-1',
+    ))->toThrow(
+        ConflictHttpException::class,
+        'Fulfillment cannot be changed after checkout.',
+    );
+});

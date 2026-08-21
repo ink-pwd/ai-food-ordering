@@ -8,6 +8,7 @@ use App\DTO\OrderingBackend\CurrentPaymentData;
 use App\DTO\OrderingBackend\DeliveryAddressData;
 use App\DTO\OrderingBackend\DeliveryValidationData;
 use App\DTO\OrderingBackend\OrderData;
+use App\DTO\OrderingBackend\OrderTrackingData;
 use App\DTO\OrderingBackend\PickupAddressData;
 use App\DTO\OrderingBackend\ProductData;
 use App\DTO\OrderingBackend\ProductSummaryData;
@@ -21,6 +22,7 @@ final readonly class OrderingBackendClient
         private FulfillmentOrderingBackendClient $fulfillment,
         private CartOrderingBackendClient $cart,
         private OrderOrderingBackendClient $order,
+        private OrderTrackingOrderingBackendClient $tracking,
         private CatalogOrderingBackendClient $catalog,
     ) {
     }
@@ -284,6 +286,16 @@ final readonly class OrderingBackendClient
     ): OrderData {
         return $this->order->currentOrder(
             $sessionToken,
+        );
+    }
+
+    public function orderTracking(
+        string $sessionToken,
+        int $orderId,
+    ): OrderTrackingData {
+        return $this->tracking->get(
+            $sessionToken,
+            $orderId,
         );
     }
 

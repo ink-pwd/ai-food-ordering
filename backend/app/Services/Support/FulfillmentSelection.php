@@ -89,7 +89,7 @@ class FulfillmentSelection
         string $sessionId,
     ): void {
         if (
-            $carts->hasNonActiveCartForSession(
+            $carts->hasOrderForActiveCartForSession(
                 $restaurant,
                 $sessionId,
             )

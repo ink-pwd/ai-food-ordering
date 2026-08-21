@@ -110,6 +110,14 @@ class OrderRepository
             ->first();
     }
 
+    public function findByIdForCustomerPhone(int $orderId, string $customerPhone): ?Order
+    {
+        return Order::query()
+            ->whereKey($orderId)
+            ->where('customer_phone', $customerPhone)
+            ->first();
+    }
+
     /**
      * Dots accepted the create request and returned its asynchronous order id.
      * The order stays in Creating until a later status check confirms creation.

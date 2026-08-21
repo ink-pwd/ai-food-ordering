@@ -93,9 +93,9 @@ readonly class SynchronizeDotsCompanyHandler
             'restaurant_state' => $restaurantPersistence['state'],
 
             'addresses' => $this->synchronizeAddresses(
-                    $restaurant,
-                    $addressItems,
-                ),
+                $restaurant,
+                $addressItems,
+            ),
         ];
     }
 
@@ -194,12 +194,12 @@ readonly class SynchronizeDotsCompanyHandler
             'locale' => 'uk-UA',
             'timezone' => $timezone,
             'is_active' => $this->isActiveDotsEntity(
-                    $company,
-                ),
+                $company,
+            ),
             'image_url' => $company['image'] ?? null,
             'available_payment_types' => $this->availablePaymentTypes(
-                    $paymentTypes,
-                ),
+                $paymentTypes,
+            ),
             'available_delivery_types' => $company[
                 'availableDeliveryTypes'
                 ] ?? [],
@@ -249,8 +249,8 @@ readonly class SynchronizeDotsCompanyHandler
             ),
             'polygon' => $address['polygon'] ?? null,
             'is_active' => $this->isActiveDotsEntity(
-                    $address + ['status' => 1],
-                ),
+                $address + ['status' => 1],
+            ),
         ];
     }
 

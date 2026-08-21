@@ -18,20 +18,19 @@ final class OrderKeyboard
             ));
         }
 
-        return $this->addExit($keyboard);
+        return $this->addBackToMainMenu($keyboard, $context);
     }
 
     public function paymentPending(string $context): InlineKeyboardMarkup
     {
-        return InlineKeyboardMarkup::make()
-            ->addRow(InlineKeyboardButton::make(
-                text: '🔄 Оновити оплату',
-                callback_data: "payment:refresh:{$context}",
-            ))
-            ->addRow(InlineKeyboardButton::make(
-                text: '🚪 Вийти',
-                callback_data: 'exit',
-            ));
+        return $this->addBackToMainMenu(
+            InlineKeyboardMarkup::make()
+                ->addRow(InlineKeyboardButton::make(
+                    text: '🔄 Оновити оплату',
+                    callback_data: "payment:refresh:{$context}",
+                )),
+            $context,
+        );
     }
 
     public function paymentReady(string $checkoutUrl, string $context, bool $includePayButton = true): InlineKeyboardMarkup
@@ -45,28 +44,24 @@ final class OrderKeyboard
             ));
         }
 
-        return $keyboard
-            ->addRow(InlineKeyboardButton::make(
-                text: '🔄 Оновити оплату',
-                callback_data: "payment:refresh:{$context}",
-            ))
-            ->addRow(InlineKeyboardButton::make(
-                text: '🚪 Вийти',
-                callback_data: 'exit',
-            ));
+        $keyboard->addRow(InlineKeyboardButton::make(
+            text: '🔄 Оновити оплату',
+            callback_data: "payment:refresh:{$context}",
+        ));
+
+        return $this->addBackToMainMenu($keyboard, $context);
     }
 
     public function statusCheck(string $context): InlineKeyboardMarkup
     {
-        return InlineKeyboardMarkup::make()
-            ->addRow(InlineKeyboardButton::make(
-                text: '🔄 Оновити замовлення',
-                callback_data: "order:refresh:{$context}",
-            ))
-            ->addRow(InlineKeyboardButton::make(
-                text: '🚪 Вийти',
-                callback_data: 'exit',
-            ));
+        return $this->addBackToMainMenu(
+            InlineKeyboardMarkup::make()
+                ->addRow(InlineKeyboardButton::make(
+                    text: '🔄 Оновити замовлення',
+                    callback_data: "order:refresh:{$context}",
+                )),
+            $context,
+        );
     }
 
     public function backToCart(string $context): InlineKeyboardMarkup
@@ -82,11 +77,13 @@ final class OrderKeyboard
             ));
     }
 
-    private function addExit(InlineKeyboardMarkup $keyboard): InlineKeyboardMarkup
-    {
+    private function addBackToMainMenu(
+        InlineKeyboardMarkup $keyboard,
+        string $context,
+    ): InlineKeyboardMarkup {
         return $keyboard->addRow(InlineKeyboardButton::make(
-            text: '🚪 Вийти',
-            callback_data: 'exit',
+            text: '⬅️ Назад',
+            callback_data: "post_order:main_menu:{$context}",
         ));
     }
 }

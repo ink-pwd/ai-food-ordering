@@ -130,10 +130,10 @@ final readonly class SelectionOrderingBackendClient
 
         return array_map(
             fn (mixed $restaurant): RestaurantData => $this->restaurantFromValue(
-                    $restaurant,
-                    $response,
-                    'list_current_session_restaurants',
-                ),
+                $restaurant,
+                $response,
+                'list_current_session_restaurants',
+            ),
             $restaurants,
         );
     }

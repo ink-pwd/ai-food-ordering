@@ -13,6 +13,7 @@ final class MainMenuKeyboard
             ->addRow(InlineKeyboardButton::make('🍕 Каталог', callback_data: "catalog:{$context}"))
             ->addRow(InlineKeyboardButton::make('🛒 Кошик', callback_data: "menu:cart:{$context}"))
             ->addRow(InlineKeyboardButton::make('🚚 Спосіб отримання', callback_data: "fulfillment:menu:{$context}"))
+            ->addRow(InlineKeyboardButton::make('📍 Де замовлення?', callback_data: "menu:tracking:{$context}"))
             ->addRow(InlineKeyboardButton::make('🚪 Вийти', callback_data: 'exit'));
     }
 }

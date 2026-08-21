@@ -7,6 +7,7 @@ use App\Telegram\Handlers\CitySelectionHandler;
 use App\Telegram\Handlers\ContactHandler;
 use App\Telegram\Handlers\ExitHandler;
 use App\Telegram\Handlers\FulfillmentHandler;
+use App\Telegram\Handlers\OrderTrackingHandler;
 use App\Telegram\Handlers\OtpHandler;
 use App\Telegram\Handlers\OtpTextHandler;
 use App\Telegram\Handlers\RestaurantSelectionHandler;
@@ -51,7 +52,13 @@ $bot->onCallbackQueryData('product:{categoryId}:{productId}:{restaurantId}:{fing
     ->whereNumber('restaurantId');
 $bot->onCallbackQueryData('main_menu:{restaurantId}:{fingerprint}', [CatalogHandler::class, 'mainMenu'])
     ->whereNumber('restaurantId');
+$bot->onCallbackQueryData('post_order:main_menu:{restaurantId}:{fingerprint}', [CatalogHandler::class, 'postOrderMainMenu'])
+    ->whereNumber('restaurantId');
 $bot->onCallbackQueryData('menu:cart:{restaurantId}:{fingerprint}', [CartHandler::class, 'show'])
+    ->whereNumber('restaurantId');
+$bot->onCallbackQueryData('menu:tracking:{restaurantId}:{fingerprint}', [OrderTrackingHandler::class, 'prompt'])
+    ->whereNumber('restaurantId');
+$bot->onCallbackQueryData('tracking:back:{restaurantId}:{fingerprint}', [OrderTrackingHandler::class, 'back'])
     ->whereNumber('restaurantId');
 $bot->onCallbackQueryData('cart:add:{productId}:{restaurantId}:{fingerprint}', [CartHandler::class, 'add'])
     ->whereNumber('productId')

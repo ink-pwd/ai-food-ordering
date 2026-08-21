@@ -34,6 +34,16 @@ readonly class OrdersApi
     /**
      * @return array<string, mixed>
      */
+    public function getCourierData(string $orderId): array
+    {
+        return $this->dotsClient->authenticatedGet(
+            "/api/v2/orders/{$orderId}/courier-data",
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     public function getOnlinePaymentData(string $orderId): array
     {
         return $this->dotsClient->authenticatedGet(

@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Order\OrderCurrentController;
 use App\Http\Controllers\Api\Order\OrderPaymentController;
 use App\Http\Controllers\Api\Order\OrderPaymentQrController;
 use App\Http\Controllers\Api\Order\OrderStoreController;
+use App\Http\Controllers\Api\Order\OrderTrackingController;
 use App\Http\Controllers\Api\Restaurant\RestaurantCatalogController;
 use App\Http\Controllers\Api\Restaurant\RestaurantCategoryController;
 use App\Http\Controllers\Api\Restaurant\RestaurantCategoryProductController;
@@ -152,6 +153,11 @@ Route::post('orders', OrderStoreController::class)
 Route::get('orders/current', OrderCurrentController::class)
     ->middleware(['internal.api', 'internal.session'])
     ->name('internal.orders.current.show');
+
+Route::get('orders/{order}/tracking', OrderTrackingController::class)
+    ->whereNumber('order')
+    ->middleware(['internal.api', 'internal.session'])
+    ->name('internal.orders.tracking.show');
 
 Route::get('orders/current/payment', OrderPaymentController::class)
     ->middleware(['internal.api', 'internal.session'])

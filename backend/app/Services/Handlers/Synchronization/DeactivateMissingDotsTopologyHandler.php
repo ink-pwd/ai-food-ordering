@@ -48,8 +48,8 @@ readonly class DeactivateMissingDotsTopologyHandler
     ): array {
         return [
             'cities' => $this->cities->deactivateMissing(
-                    $presentCityIds,
-                ),
+                $presentCityIds,
+            ),
 
             'restaurants' => $this->restaurants
                     ->deactivateRestaurantsForInactiveCities(),

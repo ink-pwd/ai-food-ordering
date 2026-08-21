@@ -36,7 +36,7 @@ final class UpdateSessionPaymentHandler
 
         PaymentSelection::assertSupported($restaurant, $paymentType);
 
-        if ($this->carts->hasNonActiveCartForSession(
+        if ($this->carts->hasOrderForActiveCartForSession(
             $restaurant,
             $session->id,
         )) {

@@ -139,6 +139,24 @@ final readonly class CatalogHandler
         );
     }
 
+    public function postOrderMainMenu(Nutgram $bot, int $restaurantId, string $fingerprint): void
+    {
+        if (! $this->callbackAcknowledger->acknowledge($bot)) {
+            return;
+        }
+
+        $context = $this->validatedContext($bot, $restaurantId, $fingerprint);
+
+        if ($context === null) {
+            return;
+        }
+
+        $bot->sendMessage(
+            text: 'Вітаємо! Оберіть дію:',
+            reply_markup: $this->mainMenu->make($context['callbackContext']),
+        );
+    }
+
     /**
      * @return array{sessionToken: string, callbackContext: string, restaurantSlug: string}|null
      */
